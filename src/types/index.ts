@@ -1,0 +1,313 @@
+// Type definitions for the Company Knowledge Base
+
+export interface Keyword {
+  id: string;
+  parent_id: string | null;
+  title: string;
+  slug: string;
+  definition: string | null;
+  explanation: string | null;
+  examples: string[] | null;
+  synonyms: string[] | null;
+  labels_json: Record<string, string>;
+  rules: string[] | null;
+  icon: string | null;
+  color: string | null;
+  sort_order: number;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  // Computed/joined fields
+  children?: Keyword[];
+  relations?: KeywordRelation[];
+  assets?: Asset[];
+}
+
+export type RelationType =
+  | 'is-a'
+  | 'part-of'
+  | 'requires'
+  | 'causes'
+  | 'leads-to'
+  | 'owned-by'
+  | 'depends-on'
+  | 'related-to'
+  | 'approves'
+  | 'contains'
+  | 'triggers'
+  | 'blocks'
+  | 'succeeds'
+  | 'precedes';
+
+export interface KeywordRelation {
+  id: string;
+  from_keyword_id: string;
+  relation_type: RelationType;
+  to_keyword_id: string;
+  note: string | null;
+  strength: number;
+  bidirectional: boolean;
+  created_at: string;
+  // Joined fields
+  from_keyword?: Keyword;
+  to_keyword?: Keyword;
+}
+
+export type AssetType = 'pdf' | 'image' | 'excel' | 'word' | 'text' | 'audio' | 'video' | 'other';
+
+export interface Asset {
+  id: string;
+  file_name: string;
+  file_url: string;
+  file_type: AssetType;
+  mime_type: string | null;
+  file_size: number | null;
+  extracted_text: string | null;
+  meta_json: Record<string, any>;
+  thumbnail_url: string | null;
+  processed: boolean;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KeywordAsset {
+  id: string;
+  keyword_id: string;
+  asset_id: string;
+  relevance_score: number;
+  note: string | null;
+  created_at: string;
+  // Joined
+  asset?: Asset;
+  keyword?: Keyword;
+}
+
+export interface Chunk {
+  id: string;
+  asset_id: string | null;
+  keyword_id: string | null;
+  chunk_index: number;
+  chunk_text: string;
+  chunk_type: string;
+  embedding: number[] | null;
+  token_count: number | null;
+  meta_json: Record<string, any>;
+  created_at: string;
+}
+
+export interface VoiceRecording {
+  id: string;
+  keyword_id: string;
+  audio_url: string;
+  transcription: string | null;
+  duration_seconds: number | null;
+  field_updated: 'definition' | 'explanation' | 'example';
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface ChatSession {
+  id: string;
+  title: string | null;
+  context_keywords: string[];
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  messages?: ChatMessage[];
+}
+
+export interface ChatMessage {
+  id: string;
+  session_id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  sources_json: Array<{
+    type: 'keyword' | 'asset' | 'chunk';
+    id: string;
+    title?: string;
+  }>;
+  token_count: number | null;
+  created_at: string;
+}
+
+// API Response types
+export interface ApiResponse<T> {
+  data: T | null;
+  error: string | null;
+}
+
+// Search/Query types
+export interface SearchResult {
+  chunks: Array<Chunk & { similarity: number }>;
+  keywords: Keyword[];
+  assets: Asset[];
+}
+
+export interface AskAIRequest {
+  question: string;
+  context_keyword_ids?: string[];
+  include_relations?: boolean;
+  include_assets?: boolean;
+}
+
+export interface AskAIResponse {
+  answer: string;
+  sources: Array<{
+    type: 'keyword' | 'asset' | 'chunk';
+    id: string;
+    title: string;
+    relevance: number;
+  }>;
+  suggested_keywords?: string[];
+  keyword_suggestions?: KeywordSuggestion[];
+}
+
+// AI-suggested keyword for creation
+export interface KeywordSuggestion {
+  title: string;
+  definition: string;
+  parent_title?: string;
+  parent_id?: string | null;
+  children?: KeywordSuggestion[];
+  examples?: string[];
+  synonyms?: string[];
+}
+
+// Request to generate keyword suggestions
+export interface GenerateKeywordsRequest {
+  topic: string;
+  context?: string;
+  depth?: number; // How many levels of sub-keywords
+  count?: number; // How many keywords to generate
+}
+
+// Response with generated keywords
+export interface GenerateKeywordsResponse {
+  keywords: KeywordSuggestion[];
+  explanation: string;
+}
+
+// =====================================================
+// Structured data + analytics (grounded computations)
+// =====================================================
+
+export type DatasetColumnType = 'text' | 'number' | 'date' | 'boolean' | 'json';
+
+export interface Dataset {
+  id: string;
+  asset_id: string | null;
+  title: string;
+  description: string | null;
+  created_by: string | null;
+  created_at: string;
+  asset?: Asset | null;
+  tables?: DatasetTable[];
+}
+
+export interface DatasetTable {
+  id: string;
+  dataset_id: string;
+  name: string;
+  row_count: number;
+  column_count: number;
+  meta_json: Record<string, any>;
+  created_at: string;
+  columns?: DatasetColumn[];
+}
+
+export interface DatasetColumn {
+  id: string;
+  dataset_table_id: string;
+  name: string;
+  normalized_name: string;
+  data_type: DatasetColumnType;
+  sample_values: string[];
+  created_at: string;
+}
+
+export interface DatasetRow {
+  id: string;
+  dataset_table_id: string;
+  row_index: number;
+  data: Record<string, any>;
+  source_json: Record<string, any>;
+  created_at: string;
+}
+
+export type AnalyticsFilterOp =
+  | 'eq'
+  | 'ne'
+  | 'lt'
+  | 'lte'
+  | 'gt'
+  | 'gte'
+  | 'in'
+  | 'contains'
+  | 'between'
+  | 'is_null'
+  | 'not_null';
+
+export type AnalyticsAggregateOp = 'count' | 'sum' | 'avg' | 'min' | 'max';
+
+export interface AnalyticsTableQueryFilter {
+  field: string;
+  op: AnalyticsFilterOp;
+  value?: any;
+  values?: any[];
+  min?: any;
+  max?: any;
+}
+
+export interface AnalyticsTableQueryMetric {
+  op: AnalyticsAggregateOp;
+  field?: string;
+  as: string;
+}
+
+export interface AnalyticsTableQueryOrderBy {
+  field: string;
+  direction?: 'asc' | 'desc';
+}
+
+export interface AnalyticsTableQueryRequest {
+  dataset_table_id: string;
+  filters?: AnalyticsTableQueryFilter[];
+  group_by?: string[];
+  metrics: AnalyticsTableQueryMetric[];
+  order_by?: AnalyticsTableQueryOrderBy[];
+  limit?: number;
+  evidence_limit?: number;
+  max_rows?: number;
+}
+
+export interface AnalyticsTableQueryResponse {
+  table: DatasetTable & { dataset?: Dataset | null; asset?: Asset | null };
+  query: Omit<AnalyticsTableQueryRequest, 'dataset_table_id'>;
+  result: {
+    rows: Array<Record<string, any>>;
+    stats: {
+      input_rows: number;
+      matched_rows: number;
+      grouped_rows: number;
+    };
+    evidence: {
+      used_row_ids: string[];
+      used_row_ids_by_group?: Record<string, string[]>;
+    };
+  };
+}
+
+export interface AnalyticsAskRequest {
+  question: string;
+  dataset_table_id: string;
+}
+
+export interface AnalyticsAskResponse {
+  answer: string;
+  tool_results?: Array<{
+    tool: string;
+    input: Record<string, any>;
+    output: Record<string, any>;
+  }>;
+}
