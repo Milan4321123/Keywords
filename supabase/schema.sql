@@ -276,7 +276,7 @@ begin
       c.chunk_type,
       c.meta_json,
       -- Vector similarity in [0, 1]
-      greatest(0, 1 - (c.embedding <=> query_embedding)) as vec_sim,
+      coalesce(greatest(0, 1 - (c.embedding <=> query_embedding)), 0) as vec_sim,
       -- Text rank is typically small; clamp to [0, 1] for blending
       least(1, ts_rank_cd(c.search_vector, q)) as text_rank
     from chunks c
@@ -291,11 +291,10 @@ begin
             and ka.keyword_id = any(filter_keyword_ids)
         )
       )
-      and c.embedding is not null
       and (
         -- match on text OR on vectors above threshold
         (coalesce(query_text, '') <> '' and c.search_vector @@ q)
-        or greatest(0, 1 - (c.embedding <=> query_embedding)) > match_threshold
+        or coalesce(greatest(0, 1 - (c.embedding <=> query_embedding)), 0) > match_threshold
       )
   )
   select
