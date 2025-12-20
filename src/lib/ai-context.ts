@@ -6,26 +6,39 @@ import { Keyword, KeywordRelation, Asset, Chunk } from '@/types';
 export function buildAIContext(
   keywords: Keyword[],
   relations: KeywordRelation[],
-  chunks: Array<Chunk & { similarity: number }>
+  chunks: Array<Chunk & { similarity: number }>,
+  options?: {
+    maxKeywords?: number;
+    maxChunks?: number;
+    maxChunkChars?: number;
+    maxFieldChars?: number;
+  }
 ): string {
+  const {
+    maxKeywords = 15,
+    maxChunks = 10,
+    maxChunkChars = 1500,
+    maxFieldChars = 800,
+  } = options || {};
+
   const parts: string[] = [];
 
   // Add keyword definitions
   if (keywords.length > 0) {
     parts.push('## Company Ontology (Definitions)\n');
-    for (const kw of keywords) {
+    for (const kw of keywords.slice(0, maxKeywords)) {
       parts.push(`### ${kw.title}`);
       if (kw.definition) {
-        parts.push(`**Definition:** ${kw.definition}`);
+        parts.push(`**Definition:** ${truncateText(kw.definition, maxFieldChars)}`);
       }
       if (kw.explanation) {
-        parts.push(`**Explanation:** ${kw.explanation}`);
+        parts.push(`**Explanation:** ${truncateText(kw.explanation, maxFieldChars)}`);
       }
       if (kw.examples && kw.examples.length > 0) {
-        parts.push(`**Examples:** ${kw.examples.join(', ')}`);
+        parts.push(`**Examples:** ${truncateText(kw.examples.join(', '), maxFieldChars)}`);
       }
       if (kw.rules && kw.rules.length > 0) {
-        parts.push(`**Rules:** ${kw.rules.join('; ')}`);
+        parts.push(`**Rules:** ${truncateText(kw.rules.join('; '), maxFieldChars)}`);
       }
       parts.push('');
     }
@@ -45,15 +58,21 @@ export function buildAIContext(
   // Add relevant document chunks
   if (chunks.length > 0) {
     parts.push('## Relevant Documents\n');
-    for (const chunk of chunks) {
+    for (const chunk of chunks.slice(0, maxChunks)) {
       const relevance = Math.round(chunk.similarity * 100);
       parts.push(`### [Relevance: ${relevance}%]`);
-      parts.push(chunk.chunk_text);
+      parts.push(truncateText(chunk.chunk_text, maxChunkChars));
       parts.push('');
     }
   }
 
   return parts.join('\n');
+}
+
+function truncateText(text: string, maxChars: number): string {
+  if (!text) return text;
+  if (text.length <= maxChars) return text;
+  return text.slice(0, Math.max(0, maxChars - 1)).trimEnd() + '…';
 }
 
 /**

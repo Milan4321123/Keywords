@@ -92,6 +92,17 @@ export async function POST(req: NextRequest) {
         });
         
         relevantChunks = rankChunks(chunks || []);
+
+        // Fallback: if keyword-scoped search yields nothing, try a small global search.
+        if (relevantChunks.length === 0 && relevantKeywordIds.length > 0) {
+          const { data: globalChunks } = await supabase.rpc('match_chunks', {
+            query_embedding: questionEmbedding,
+            match_threshold: 0.75,
+            match_count: 5,
+            filter_keyword_ids: null,
+          });
+          relevantChunks = rankChunks(globalChunks || [], { minSimilarity: 0.75, maxChunks: 5 });
+        }
       } catch (embeddingError) {
         console.error('Embedding search error:', embeddingError);
         // Continue without document search
@@ -99,7 +110,12 @@ export async function POST(req: NextRequest) {
     }
 
     // 7. Build context for the AI
-    const context = buildAIContext(relevantKeywords, relations, relevantChunks);
+    const context = buildAIContext(relevantKeywords, relations, relevantChunks, {
+      maxKeywords: 20,
+      maxChunks: 10,
+      maxChunkChars: 1500,
+      maxFieldChars: 800,
+    });
 
     // 8. Generate response using GPT
     const systemPrompt = getSystemPrompt('Your Company');
