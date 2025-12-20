@@ -119,6 +119,8 @@ export function extractPotentialKeywords(question: string, keywords: Keyword[]):
   const questionLower = question.toLowerCase();
   
   return keywords.filter(kw => {
+    if (!kw.title || kw.title.trim().length === 0) return false;
+
     // Check title
     if (questionLower.includes(kw.title.toLowerCase())) return true;
     

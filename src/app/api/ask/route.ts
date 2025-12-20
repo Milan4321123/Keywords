@@ -4,6 +4,8 @@ import { createEmbedding, chatCompletion, rerankChunks } from '@/lib/openai';
 import { buildAIContext, getSystemPrompt, extractPotentialKeywords, rankChunks } from '@/lib/ai-context';
 import { Keyword, KeywordRelation, Chunk, AskAIResponse } from '@/types';
 
+type ChunkWithSimilarity = Chunk & { similarity: number };
+
 // POST /api/ask - Ask AI a question using the knowledge base
 export async function POST(req: NextRequest) {
   try {
@@ -77,13 +79,13 @@ export async function POST(req: NextRequest) {
     }
 
     // 6. Search for relevant document chunks
-    let relevantChunks: Array<Chunk & { similarity: number }> = [];
+    let relevantChunks: ChunkWithSimilarity[] = [];
     if (include_assets) {
       try {
         // Create embedding for the question
         const questionEmbedding = await createEmbedding(question);
 
-        const tryHybrid = async (filterKeywordIds: string[] | null) => {
+        const tryHybrid = async (filterKeywordIds: string[] | null): Promise<ChunkWithSimilarity[]> => {
           const { data, error } = await supabase.rpc('match_chunks_hybrid', {
             query_text: question,
             query_embedding: questionEmbedding,
@@ -94,10 +96,10 @@ export async function POST(req: NextRequest) {
             weight_text: 0.3,
           });
           if (error) throw error;
-          return (data ?? []) as Array<Chunk & { similarity: number }>;
+          return (data ?? []) as ChunkWithSimilarity[];
         };
 
-        const tryVectorOnly = async (filterKeywordIds: string[] | null) => {
+        const tryVectorOnly = async (filterKeywordIds: string[] | null): Promise<ChunkWithSimilarity[]> => {
           const { data, error } = await supabase.rpc('match_chunks', {
             query_embedding: questionEmbedding,
             match_threshold: 0.7,
@@ -105,12 +107,12 @@ export async function POST(req: NextRequest) {
             filter_keyword_ids: filterKeywordIds,
           });
           if (error) throw error;
-          return (data ?? []) as Array<Chunk & { similarity: number }>;
+          return (data ?? []) as ChunkWithSimilarity[];
         };
 
         // Prefer hybrid retrieval (vector + full-text) if the RPC exists.
         // If it's not deployed in Supabase yet, fall back to vector-only search.
-        let candidates: Array<Chunk & { similarity: number }> = [];
+        let candidates: ChunkWithSimilarity[] = [];
         try {
           candidates = await tryHybrid(relevantKeywordIds.length > 0 ? relevantKeywordIds : null);
         } catch (e: any) {
@@ -124,7 +126,7 @@ export async function POST(req: NextRequest) {
 
         // Fallback: if keyword-scoped retrieval yields nothing, try a small global retrieval.
         if (relevantChunks.length === 0 && relevantKeywordIds.length > 0) {
-          let globalCandidates: Array<Chunk & { similarity: number }> = [];
+          let globalCandidates: ChunkWithSimilarity[] = [];
           try {
             globalCandidates = await tryHybrid(null);
           } catch {
@@ -135,6 +137,7 @@ export async function POST(req: NextRequest) {
 
         // Optional rerank: use a cheap LLM to pick the most useful chunks.
         if (relevantChunks.length > 0) {
+          const originalSimilarityById = new Map(relevantChunks.map((c) => [c.id, c.similarity] as const));
           const rankings = await rerankChunks({
             question,
             chunks: relevantChunks.map((c) => ({ id: c.id, text: c.chunk_text })),
@@ -143,13 +146,18 @@ export async function POST(req: NextRequest) {
 
           if (rankings.length > 0) {
             const scoreById = new Map(rankings.map((r) => [r.id, r.score] as const));
+            const maxScore = Math.max(...rankings.map((r) => r.score));
+
+            // If reranker couldn't produce meaningful scores, keep original similarity ordering.
+            if (maxScore >= 0.05) {
             const picked = relevantChunks
               .filter((c) => scoreById.has(c.id))
-              .map((c) => ({ ...c, similarity: scoreById.get(c.id) ?? c.similarity }))
+              .map((c) => ({ ...c, similarity: scoreById.get(c.id) ?? (originalSimilarityById.get(c.id) ?? c.similarity) }))
               .sort((a, b) => (scoreById.get(b.id) ?? 0) - (scoreById.get(a.id) ?? 0));
 
             if (picked.length > 0) {
               relevantChunks = picked;
+            }
             }
           }
         }
@@ -182,8 +190,20 @@ export async function POST(req: NextRequest) {
     });
 
     // 9. Compile sources
+    const assetIdSet = new Set(relevantChunks.map((c) => c.asset_id).filter(Boolean) as string[]);
+    const assetIds = Array.from(assetIdSet);
+    const assetNameById = new Map<string, string>();
+    if (assetIds.length > 0) {
+      const { data: assets } = await supabase.from('assets').select('id,file_name').in('id', assetIds);
+      for (const a of assets ?? []) {
+        if (a?.id && a?.file_name) assetNameById.set(a.id, a.file_name);
+      }
+    }
+
     const sources: AskAIResponse['sources'] = [
-      ...relevantKeywords.map((k) => ({
+      ...relevantKeywords
+        .filter((k) => Boolean(k.title && k.title.trim().length > 0))
+        .map((k) => ({
         type: 'keyword' as const,
         id: k.id,
         title: k.title,
@@ -192,7 +212,14 @@ export async function POST(req: NextRequest) {
       ...relevantChunks.slice(0, 5).map((c) => ({
         type: 'chunk' as const,
         id: c.id,
-        title: `Document chunk ${c.chunk_index + 1}`,
+        title: (() => {
+          const assetName = c.asset_id ? assetNameById.get(c.asset_id) : undefined;
+          const idx = Number.isFinite(c.chunk_index) ? c.chunk_index + 1 : undefined;
+          if (assetName && idx) return `${assetName} (chunk ${idx})`;
+          if (assetName) return assetName;
+          if (idx) return `Document chunk ${idx}`;
+          return 'Document chunk';
+        })(),
         relevance: c.similarity,
       })),
     ];
@@ -201,7 +228,7 @@ export async function POST(req: NextRequest) {
     const response: AskAIResponse = {
       answer,
       sources,
-      suggested_keywords: mentionedKeywords.map((k) => k.title),
+      suggested_keywords: mentionedKeywords.map((k) => k.title).filter((t) => Boolean(t && t.trim().length > 0)),
     };
 
     return NextResponse.json(response);
