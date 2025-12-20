@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@/lib/supabase';
-import { createEmbedding, chatCompletion } from '@/lib/openai';
+import { createEmbedding, chatCompletion, rerankChunks } from '@/lib/openai';
 import { buildAIContext, getSystemPrompt, extractPotentialKeywords, rankChunks } from '@/lib/ai-context';
 import { Keyword, KeywordRelation, Chunk, AskAIResponse } from '@/types';
 
@@ -82,26 +82,76 @@ export async function POST(req: NextRequest) {
       try {
         // Create embedding for the question
         const questionEmbedding = await createEmbedding(question);
-        
-        // Search using the match_chunks function
-        const { data: chunks } = await supabase.rpc('match_chunks', {
-          query_embedding: questionEmbedding,
-          match_threshold: 0.7,
-          match_count: 10,
-          filter_keyword_ids: relevantKeywordIds.length > 0 ? relevantKeywordIds : null,
-        });
-        
-        relevantChunks = rankChunks(chunks || []);
 
-        // Fallback: if keyword-scoped search yields nothing, try a small global search.
-        if (relevantChunks.length === 0 && relevantKeywordIds.length > 0) {
-          const { data: globalChunks } = await supabase.rpc('match_chunks', {
+        const tryHybrid = async (filterKeywordIds: string[] | null) => {
+          const { data, error } = await supabase.rpc('match_chunks_hybrid', {
+            query_text: question,
             query_embedding: questionEmbedding,
-            match_threshold: 0.75,
-            match_count: 5,
-            filter_keyword_ids: null,
+            match_threshold: 0.65,
+            match_count: 25,
+            filter_keyword_ids: filterKeywordIds,
+            weight_vector: 0.7,
+            weight_text: 0.3,
           });
-          relevantChunks = rankChunks(globalChunks || [], { minSimilarity: 0.75, maxChunks: 5 });
+          if (error) throw error;
+          return (data ?? []) as Array<Chunk & { similarity: number }>;
+        };
+
+        const tryVectorOnly = async (filterKeywordIds: string[] | null) => {
+          const { data, error } = await supabase.rpc('match_chunks', {
+            query_embedding: questionEmbedding,
+            match_threshold: 0.7,
+            match_count: 25,
+            filter_keyword_ids: filterKeywordIds,
+          });
+          if (error) throw error;
+          return (data ?? []) as Array<Chunk & { similarity: number }>;
+        };
+
+        // Prefer hybrid retrieval (vector + full-text) if the RPC exists.
+        // If it's not deployed in Supabase yet, fall back to vector-only search.
+        let candidates: Array<Chunk & { similarity: number }> = [];
+        try {
+          candidates = await tryHybrid(relevantKeywordIds.length > 0 ? relevantKeywordIds : null);
+        } catch (e: any) {
+          const msg = String(e?.message ?? e ?? '');
+          const likelyMissingRpc = msg.includes('match_chunks_hybrid') || msg.includes('PGRST') || msg.includes('not found');
+          if (!likelyMissingRpc) throw e;
+          candidates = await tryVectorOnly(relevantKeywordIds.length > 0 ? relevantKeywordIds : null);
+        }
+
+        relevantChunks = rankChunks(candidates, { minSimilarity: 0.6, maxChunks: 25 });
+
+        // Fallback: if keyword-scoped retrieval yields nothing, try a small global retrieval.
+        if (relevantChunks.length === 0 && relevantKeywordIds.length > 0) {
+          let globalCandidates: Array<Chunk & { similarity: number }> = [];
+          try {
+            globalCandidates = await tryHybrid(null);
+          } catch {
+            globalCandidates = await tryVectorOnly(null);
+          }
+          relevantChunks = rankChunks(globalCandidates, { minSimilarity: 0.7, maxChunks: 10 });
+        }
+
+        // Optional rerank: use a cheap LLM to pick the most useful chunks.
+        if (relevantChunks.length > 0) {
+          const rankings = await rerankChunks({
+            question,
+            chunks: relevantChunks.map((c) => ({ id: c.id, text: c.chunk_text })),
+            topN: 10,
+          });
+
+          if (rankings.length > 0) {
+            const scoreById = new Map(rankings.map((r) => [r.id, r.score] as const));
+            const picked = relevantChunks
+              .filter((c) => scoreById.has(c.id))
+              .map((c) => ({ ...c, similarity: scoreById.get(c.id) ?? c.similarity }))
+              .sort((a, b) => (scoreById.get(b.id) ?? 0) - (scoreById.get(a.id) ?? 0));
+
+            if (picked.length > 0) {
+              relevantChunks = picked;
+            }
+          }
         }
       } catch (embeddingError) {
         console.error('Embedding search error:', embeddingError);
