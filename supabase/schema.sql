@@ -217,7 +217,16 @@ begin
     1 - (c.embedding <=> query_embedding) as similarity
   from chunks c
   where 
-    (filter_keyword_ids is null or c.keyword_id = any(filter_keyword_ids))
+    (
+      filter_keyword_ids is null
+      or c.keyword_id = any(filter_keyword_ids)
+      or exists (
+        select 1
+        from keyword_assets ka
+        where ka.asset_id = c.asset_id
+          and ka.keyword_id = any(filter_keyword_ids)
+      )
+    )
     and 1 - (c.embedding <=> query_embedding) > match_threshold
   order by c.embedding <=> query_embedding
   limit match_count;

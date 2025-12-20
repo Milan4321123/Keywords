@@ -71,7 +71,7 @@ export async function POST(req: NextRequest) {
 
     // Queue for processing (text extraction, chunking)
     // In a real app, this would trigger a background job
-    processAssetAsync(asset.id, fileBuffer, mimeType);
+    processAssetAsync(asset.id, fileBuffer, mimeType, keywordId);
 
     return NextResponse.json({ data: asset, error: null });
   } catch (error) {
@@ -84,7 +84,12 @@ export async function POST(req: NextRequest) {
 }
 
 // Background processing function (simplified - in production use a job queue)
-async function processAssetAsync(assetId: string, fileBuffer?: ArrayBuffer, mimeType?: string) {
+async function processAssetAsync(
+  assetId: string,
+  fileBuffer?: ArrayBuffer,
+  mimeType?: string,
+  keywordId?: string
+) {
   try {
     const supabase = createServerClient();
 
@@ -96,6 +101,19 @@ async function processAssetAsync(assetId: string, fileBuffer?: ArrayBuffer, mime
       .single();
 
     if (!asset) return;
+
+    // If a keyword wasn't passed explicitly, try to infer it from the link table.
+    // Note: assets can be linked to multiple keywords; in that case keep it null.
+    if (!keywordId) {
+      const { data: links } = await supabase
+        .from('keyword_assets')
+        .select('keyword_id')
+        .eq('asset_id', assetId);
+
+      if (links && links.length === 1) {
+        keywordId = links[0].keyword_id;
+      }
+    }
 
     let extractedText = '';
 
@@ -140,6 +158,7 @@ async function processAssetAsync(assetId: string, fileBuffer?: ArrayBuffer, mime
           
           await supabase.from('chunks').insert({
             asset_id: assetId,
+            keyword_id: keywordId || null,
             chunk_index: i,
             chunk_text: chunkText,
             embedding: embedding,
