@@ -138,6 +138,13 @@ create table chunks (
 create index idx_chunks_asset on chunks(asset_id);
 create index idx_chunks_keyword on chunks(keyword_id);
 
+-- Full-text search support (hybrid retrieval)
+alter table chunks
+  add column if not exists search_vector tsvector
+  generated always as (to_tsvector('english', coalesce(chunk_text, ''))) stored;
+
+create index if not exists idx_chunks_search_vector on chunks using gin (search_vector);
+
 -- Create a vector index for similarity search
 create index idx_chunks_embedding on chunks 
   using ivfflat (embedding vector_cosine_ops)
@@ -229,6 +236,78 @@ begin
     )
     and 1 - (c.embedding <=> query_embedding) > match_threshold
   order by c.embedding <=> query_embedding
+  limit match_count;
+end;
+$$;
+
+-- Hybrid retrieval (vector + full-text search)
+create or replace function match_chunks_hybrid(
+  query_text text,
+  query_embedding vector(1536),
+  match_threshold float default 0.65,
+  match_count int default 20,
+  filter_keyword_ids uuid[] default null,
+  weight_vector float default 0.7,
+  weight_text float default 0.3
+)
+returns table (
+  id uuid,
+  asset_id uuid,
+  keyword_id uuid,
+  chunk_text text,
+  chunk_type text,
+  meta_json jsonb,
+  similarity float
+)
+language plpgsql
+as $$
+declare
+  q tsquery;
+begin
+  q := websearch_to_tsquery('english', coalesce(query_text, ''));
+
+  return query
+  with scored as (
+    select
+      c.id,
+      c.asset_id,
+      c.keyword_id,
+      c.chunk_text,
+      c.chunk_type,
+      c.meta_json,
+      -- Vector similarity in [0, 1]
+      greatest(0, 1 - (c.embedding <=> query_embedding)) as vec_sim,
+      -- Text rank is typically small; clamp to [0, 1] for blending
+      least(1, ts_rank_cd(c.search_vector, q)) as text_rank
+    from chunks c
+    where
+      (
+        filter_keyword_ids is null
+        or c.keyword_id = any(filter_keyword_ids)
+        or exists (
+          select 1
+          from keyword_assets ka
+          where ka.asset_id = c.asset_id
+            and ka.keyword_id = any(filter_keyword_ids)
+        )
+      )
+      and c.embedding is not null
+      and (
+        -- match on text OR on vectors above threshold
+        (coalesce(query_text, '') <> '' and c.search_vector @@ q)
+        or greatest(0, 1 - (c.embedding <=> query_embedding)) > match_threshold
+      )
+  )
+  select
+    s.id,
+    s.asset_id,
+    s.keyword_id,
+    s.chunk_text,
+    s.chunk_type,
+    s.meta_json,
+    (weight_vector * s.vec_sim + weight_text * s.text_rank) as similarity
+  from scored s
+  order by similarity desc
   limit match_count;
 end;
 $$;
