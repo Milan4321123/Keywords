@@ -18,18 +18,29 @@ import {
   Trash2,
   Sparkles
 } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 import { Keyword, Asset, KeywordRelation } from '@/types';
 import KeywordDetail from '@/components/KeywordDetail';
 import FileUpload from '@/components/FileUpload';
 import RelationEditor from '@/components/RelationEditor';
 import AIAssistant from '@/components/AIAssistant';
 import VoiceInput from '@/components/VoiceInput';
+import ImportExportMenu from '@/components/ImportExportMenu';
+
+function completenessDot(score: number | undefined): string {
+  const s = score ?? 0;
+  if (s >= 70) return 'bg-emerald-500';
+  if (s >= 40) return 'bg-amber-500';
+  return 'bg-red-400';
+}
 
 type ViewMode = 'edit' | 'upload' | 'relations' | 'chat';
 
 export default function Home() {
+  const router = useRouter();
   // State
   const [keywords, setKeywords] = useState<Keyword[]>([]);
+  const [showMissingOnly, setShowMissingOnly] = useState(false);
   const [selectedKeyword, setSelectedKeyword] = useState<Keyword | null>(null);
   const [relations, setRelations] = useState<KeywordRelation[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -347,9 +358,12 @@ export default function Home() {
               Your company ontology — concepts, definitions, and evidence.
             </p>
           </div>
-          <div className="hidden md:flex items-center gap-2 text-xs font-medium text-slate-500 bg-slate-100/80 px-3 py-1.5 rounded-full border border-slate-200/50">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-            {keywords.length} keywords indexed
+          <div className="flex items-center gap-3">
+            <div className="hidden md:flex items-center gap-2 text-xs font-medium text-slate-500 bg-slate-100/80 px-3 py-1.5 rounded-full border border-slate-200/50">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              {keywords.length} keywords indexed
+            </div>
+            <ImportExportMenu onImported={fetchKeywords} />
           </div>
         </div>
         {/* Action Bar */}
@@ -376,6 +390,18 @@ export default function Home() {
           </div>
           
           <div className="flex items-center gap-2 w-full sm:w-auto px-2 sm:px-0 pb-2 sm:pb-0">
+            <button
+              onClick={() => setShowMissingOnly((v) => !v)}
+              className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
+                showMissingOnly
+                  ? 'bg-amber-100 text-amber-800 ring-1 ring-amber-300'
+                  : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+              }`}
+              title="Show keywords without a definition"
+            >
+              <span className={`w-2 h-2 rounded-full ${showMissingOnly ? 'bg-amber-500' : 'bg-red-400'}`} />
+              Missing definitions
+            </button>
             <div className="h-8 w-px bg-slate-200 hidden sm:block mx-2"></div>
             <button
               onClick={() => handleAddChild(null)}
@@ -396,7 +422,41 @@ export default function Home() {
           </div>
         </div>
 
-        {searchQuery.trim() ? (
+        {showMissingOnly ? (
+          <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="flex items-center justify-between mb-4 px-1">
+              <h2 className="text-sm font-semibold text-slate-700">Keywords without a definition</h2>
+              <span className="text-xs text-slate-500">
+                {sortedKeywords.filter((k) => !k.definition?.trim()).length} found
+              </span>
+            </div>
+            {sortedKeywords.filter((k) => !k.definition?.trim()).length === 0 ? (
+              <div className="bg-white rounded-3xl p-12 text-center border border-slate-200 border-dashed">
+                <p className="text-slate-500 font-medium">Every keyword has a definition. 🎉</p>
+              </div>
+            ) : (
+              <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {sortedKeywords
+                  .filter((k) => !k.definition?.trim())
+                  .map((kw) => (
+                    <button
+                      key={kw.id}
+                      onClick={() => router.push(`/keywords/${kw.id}`)}
+                      className="group text-left p-5 rounded-2xl bg-white border border-amber-200 hover:border-amber-400 hover:shadow-lg transition-all duration-300"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className={`w-2 h-2 rounded-full ${completenessDot(kw.completeness_score)}`} />
+                        <span className="font-semibold text-slate-900 group-hover:text-amber-700 transition-colors">
+                          {kw.title}
+                        </span>
+                      </div>
+                      <div className="text-xs text-amber-600 font-medium mt-2">Add a definition →</div>
+                    </button>
+                  ))}
+              </div>
+            )}
+          </section>
+        ) : searchQuery.trim() ? (
           <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
             <div className="flex items-center justify-between mb-4 px-1">
               <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
@@ -473,10 +533,35 @@ export default function Home() {
                                   active || isSelected
                                     ? 'bg-blue-50 text-blue-700 shadow-sm ring-1 ring-blue-200/50'
                                     : 'bg-transparent text-slate-700 hover:bg-slate-50 hover:text-slate-900'
-                                }`}
+                                } ${kw.status === 'archived' ? 'opacity-50' : ''}`}
                               >
-                                <span className="truncate pr-2">{kw.title}</span>
-                                {(active || isSelected) && <ChevronRight className="w-4 h-4 text-blue-500 shrink-0" />}
+                                <span className="flex items-center gap-2 min-w-0">
+                                  <span
+                                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${completenessDot(kw.completeness_score)}`}
+                                    title={`Completeness: ${kw.completeness_score ?? 0}%`}
+                                  />
+                                  <span className="truncate pr-1">{kw.title}</span>
+                                  {kw.status === 'draft' && (
+                                    <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[9px] font-bold uppercase shrink-0">
+                                      draft
+                                    </span>
+                                  )}
+                                </span>
+                                <span className="flex items-center gap-1 shrink-0">
+                                  <span
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      router.push(`/keywords/${kw.id}`);
+                                    }}
+                                    className="p-1 rounded-md text-slate-300 opacity-0 group-hover:opacity-100 hover:text-blue-600 hover:bg-blue-50 transition-all"
+                                    title="Open full page"
+                                  >
+                                    <Edit3 className="w-3.5 h-3.5" />
+                                  </span>
+                                  {(active || isSelected) && <ChevronRight className="w-4 h-4 text-blue-500" />}
+                                </span>
                               </button>
                             );
                           })}
@@ -567,6 +652,15 @@ export default function Home() {
                   </div>
                 </div>
                 <div className="flex items-center gap-3">
+                  {selectedKeyword && !isNewKeyword && (
+                    <button
+                      onClick={() => router.push(`/keywords/${selectedKeyword.id}`)}
+                      className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-xl border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100 hover:border-blue-300 transition-colors font-medium"
+                    >
+                      <Edit3 className="w-4 h-4" />
+                      <span className="hidden sm:inline">Full page</span>
+                    </button>
+                  )}
                   {selectedKeyword && !isNewKeyword && (
                     <button
                       onClick={() => handleDeleteKeyword(selectedKeyword.id)}

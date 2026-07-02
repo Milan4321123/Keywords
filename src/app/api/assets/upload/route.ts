@@ -3,6 +3,7 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { requireOrgContext, audit } from '@/lib/auth';
 import { apiError } from '@/lib/api';
 import { createEmbedding } from '@/lib/openai';
+import { recomputeKeywordCompleteness } from '@/lib/ontology/completeness';
 import pdf from 'pdf-parse';
 
 // POST /api/assets/upload - Upload files and link to keyword
@@ -85,6 +86,7 @@ export async function POST(req: NextRequest) {
         keyword_id: keywordId,
         asset_id: asset.id,
       });
+      await recomputeKeywordCompleteness(ctx.supabase, ctx.org.id, keywordId);
     }
 
     await audit(ctx, 'asset.upload', { type: 'asset', id: asset.id }, {

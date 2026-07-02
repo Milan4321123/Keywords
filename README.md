@@ -224,7 +224,10 @@ All routes require a signed-in member of the active organization; roles gate mut
 
 - [x] User authentication & permissions (Milestone 1)
 - [x] Audit log / version history (Milestone 1)
-- [ ] Keyword typing, status & completeness UI (Milestone 2)
+- [x] Keyword typing, status & completeness scoring (Milestone 2)
+- [x] Full keyword detail page with version history & restore (Milestone 2)
+- [x] AI-assisted definition suggestions with user approval (Milestone 2)
+- [x] Keyword import/export (JSON & CSV) (Milestone 2)
 - [ ] Visual knowledge graph view (Milestone 3)
 - [ ] Ingestion hardening: OCR, summaries, keyword suggestions (Milestone 4)
 - [ ] Data validation & quality reports (Milestone 5, 7)

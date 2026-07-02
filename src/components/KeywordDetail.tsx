@@ -1,18 +1,50 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { 
-  Save, 
-  Trash2, 
-  Plus, 
-  X, 
+import {
+  Save,
+  Trash2,
+  Plus,
+  X,
   Languages,
   BookOpen,
   ListChecks,
-  Link2
+  Sparkles,
+  Loader2,
+  Check
 } from 'lucide-react';
-import { Keyword, RelationType } from '@/types';
+import { Keyword, KeywordType, KeywordStatus, RelationType } from '@/types';
 import VoiceInput from './VoiceInput';
+
+const KEYWORD_TYPE_OPTIONS: { value: KeywordType; label: string }[] = [
+  { value: 'concept', label: 'Concept' },
+  { value: 'process', label: 'Process' },
+  { value: 'metric', label: 'Metric' },
+  { value: 'dataset', label: 'Dataset' },
+  { value: 'document_type', label: 'Document Type' },
+  { value: 'role', label: 'Role' },
+  { value: 'task_type', label: 'Task Type' },
+  { value: 'workflow_step', label: 'Workflow Step' },
+  { value: 'department', label: 'Department' },
+  { value: 'entity', label: 'Entity' },
+  { value: 'kpi', label: 'KPI' },
+  { value: 'report_type', label: 'Report Type' },
+  { value: 'risk', label: 'Risk' },
+  { value: 'rule', label: 'Rule' },
+  { value: 'skill', label: 'Skill' },
+];
+
+const KEYWORD_STATUS_OPTIONS: { value: KeywordStatus; label: string }[] = [
+  { value: 'draft', label: 'Draft' },
+  { value: 'active', label: 'Active' },
+  { value: 'archived', label: 'Archived' },
+];
+
+interface DefinitionSuggestion {
+  definition: string;
+  explanation: string;
+  examples: string[];
+}
 
 interface KeywordDetailProps {
   keyword: Keyword | null;
@@ -63,6 +95,9 @@ export const KeywordDetail: React.FC<KeywordDetailProps> = ({
   const [newLabelLang, setNewLabelLang] = useState('');
   const [newLabelValue, setNewLabelValue] = useState('');
   const [activeTab, setActiveTab] = useState<'basic' | 'examples' | 'relations' | 'advanced'>('basic');
+  const [suggestion, setSuggestion] = useState<DefinitionSuggestion | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
 
   useEffect(() => {
     if (keyword && !isNew) {
@@ -77,6 +112,8 @@ export const KeywordDetail: React.FC<KeywordDetailProps> = ({
         parent_id: keyword.parent_id,
         color: keyword.color || '',
         icon: keyword.icon || '',
+        keyword_type: keyword.keyword_type || 'concept',
+        status: keyword.status || 'active',
       });
     } else {
       setFormData({
@@ -103,6 +140,35 @@ export const KeywordDetail: React.FC<KeywordDetailProps> = ({
       id: isNew ? undefined : keyword?.id,
       slug: formData.title?.toLowerCase().replace(/\s+/g, '-'),
     });
+  };
+
+  const requestSuggestion = async () => {
+    if (!keyword) return;
+    setSuggesting(true);
+    setSuggestError(null);
+    try {
+      const response = await fetch(`/api/keywords/${keyword.id}/suggest-definition`, { method: 'POST' });
+      const { data, error } = await response.json();
+      if (error) throw new Error(error);
+      setSuggestion(data);
+    } catch (err: any) {
+      setSuggestError(err.message || 'Failed to get suggestion');
+    } finally {
+      setSuggesting(false);
+    }
+  };
+
+  const applySuggestion = () => {
+    if (!suggestion) return;
+    setFormData((prev) => ({
+      ...prev,
+      definition: suggestion.definition || prev.definition,
+      explanation: suggestion.explanation || prev.explanation,
+      examples: suggestion.examples?.length
+        ? Array.from(new Set([...(prev.examples || []), ...suggestion.examples]))
+        : prev.examples,
+    }));
+    setSuggestion(null);
   };
 
   const handleVoiceTranscript = (text: string, field: 'definition' | 'explanation' | 'example') => {
@@ -287,16 +353,104 @@ export const KeywordDetail: React.FC<KeywordDetailProps> = ({
               <p className="text-xs text-slate-500 font-medium">Select a broader concept that this concept belongs to.</p>
             </div>
 
+            {/* Type & Status */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="block text-sm font-bold text-slate-700">Type</label>
+                <select
+                  value={formData.keyword_type || 'concept'}
+                  onChange={(e) => setFormData({ ...formData, keyword_type: e.target.value as KeywordType })}
+                  className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-300 bg-slate-50 focus:bg-white transition-all text-slate-700"
+                >
+                  {KEYWORD_TYPE_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <label className="block text-sm font-bold text-slate-700">Status</label>
+                <select
+                  value={formData.status || 'active'}
+                  onChange={(e) => setFormData({ ...formData, status: e.target.value as KeywordStatus })}
+                  className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-300 bg-slate-50 focus:bg-white transition-all text-slate-700"
+                >
+                  {KEYWORD_STATUS_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* AI suggestion panel */}
+            {suggestion && (
+              <div className="p-5 rounded-2xl border border-indigo-200 bg-indigo-50/60 space-y-3">
+                <div className="flex items-center gap-2 text-sm font-bold text-indigo-700">
+                  <Sparkles className="w-4 h-4" />
+                  AI suggestion — review before applying
+                </div>
+                <div className="text-sm text-slate-700">
+                  <span className="font-semibold">Definition:</span> {suggestion.definition}
+                </div>
+                {suggestion.explanation && (
+                  <div className="text-sm text-slate-600 leading-relaxed">
+                    <span className="font-semibold text-slate-700">Explanation:</span> {suggestion.explanation}
+                  </div>
+                )}
+                {suggestion.examples?.length > 0 && (
+                  <ul className="text-sm text-slate-600 list-disc pl-5 space-y-0.5">
+                    {suggestion.examples.map((ex, i) => (
+                      <li key={i}>{ex}</li>
+                    ))}
+                  </ul>
+                )}
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={applySuggestion}
+                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
+                  >
+                    <Check className="w-4 h-4" /> Apply to form
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSuggestion(null)}
+                    className="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
+                  >
+                    Dismiss
+                  </button>
+                  <span className="text-xs text-slate-400">Nothing is saved until you press Save.</span>
+                </div>
+              </div>
+            )}
+            {suggestError && (
+              <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700">
+                {suggestError}
+              </div>
+            )}
+
             {/* Definition with Voice */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label className="block text-sm font-bold text-slate-700">
                   Short Definition
                 </label>
-                <VoiceInput
-                  targetField="definition"
-                  onTranscript={(text) => handleVoiceTranscript(text, 'definition')}
-                />
+                <div className="flex items-center gap-2">
+                  {!isNew && keyword && (
+                    <button
+                      type="button"
+                      onClick={requestSuggestion}
+                      disabled={suggesting}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 disabled:opacity-60 transition-colors"
+                    >
+                      {suggesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                      Suggest with AI
+                    </button>
+                  )}
+                  <VoiceInput
+                    targetField="definition"
+                    onTranscript={(text) => handleVoiceTranscript(text, 'definition')}
+                  />
+                </div>
               </div>
               <textarea
                 value={formData.definition || ''}

@@ -2,17 +2,23 @@
 
 Existing prototype gives a head start on M2 (keyword CRUD/tree/definitions), M4 (upload→extract→chunk→embed), M5 (dataset import + grounded query engine), and a seed of M6 (analytics chat with tools + evidence). The plan below upgrades everything to production grade in order.
 
-## M1 — Core Platform Foundation (THIS MILESTONE)
+## M1 — Core Platform Foundation ✅ (done)
 - [x] Design docs (this package)
-- [ ] Migration 0002: organizations, profiles, members, invites, audit_logs, keyword_versions, keyword type/status/completeness, extended relation types, org_id everywhere + backfill, intelligence foundation tables, RLS
-- [ ] Supabase Auth: login/signup, session middleware, auth callback
-- [ ] Onboarding (create org), org switcher, invites (email-claim flow)
-- [ ] `requireOrgContext` + permission map + audit writer
-- [ ] All existing API routes org-scoped + permission-checked + audited
-- [ ] App shell with final navigation; Dashboard v1; Admin (members) page; Audit page
+- [x] Migration 0002: organizations, profiles, members, invites, audit_logs, keyword_versions, keyword type/status/completeness, extended relation types, org_id everywhere + backfill, intelligence foundation tables, RLS
+- [x] Supabase Auth: login/signup, session middleware, auth callback
+- [x] Onboarding (create org), org switcher, invites (email-claim flow)
+- [x] `requireOrgContext` + permission map + audit writer
+- [x] All existing API routes org-scoped + permission-checked + audited
+- [x] App shell with final navigation; Dashboard v1; Admin (members) page; Audit page
 
-## M2 — Keyword Ontology (production grade)
-Keyword detail as full page; type/status editing; version history UI; completeness scoring job; AI-assisted definition generation (exists — harden); missing-definition detection; import/export (CSV/JSON).
+## M2 — Keyword Ontology ✅ (done)
+- [x] Full keyword detail page (`/keywords/[id]`): overview, relations, files, history tabs
+- [x] Type & status editing (15 keyword types, draft/active/archived)
+- [x] Completeness scoring: pure engine (`src/lib/ontology/completeness.ts`), recompute on save/relation/asset changes, bulk recompute endpoint; version trigger skips score-only updates (migration 0003)
+- [x] Version history UI with restore; versions attributed to the editing user
+- [x] AI-assisted definition suggestions grounded in parent/children/relations context, applied only after user approval
+- [x] Missing-definition detection filter + completeness badges in the explorer
+- [x] Import/export: JSON + CSV, upsert by slug, parent linking by slug
 
 ## M3 — Relations & Graph
 Graph view page (visual); traversal API (`get_dependency_context`) with depth limits, relation-type filters, relevance scoring; relation versioning.

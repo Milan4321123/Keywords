@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireOrgContext, audit } from '@/lib/auth';
 import { apiError } from '@/lib/api';
+import { recomputeKeywordCompleteness } from '@/lib/ontology/completeness';
 
 // GET /api/relations - Get all relations (optionally filtered)
 export async function GET(req: NextRequest) {
@@ -96,6 +97,11 @@ export async function POST(req: NextRequest) {
       relation_type: body.relation_type,
     });
 
+    await Promise.all([
+      recomputeKeywordCompleteness(ctx.supabase, ctx.org.id, body.from_keyword_id),
+      recomputeKeywordCompleteness(ctx.supabase, ctx.org.id, body.to_keyword_id),
+    ]);
+
     return NextResponse.json({ data: relation, error: null });
   } catch (error) {
     return apiError(error, 'Failed to create relation');
@@ -116,6 +122,13 @@ export async function DELETE(req: NextRequest) {
       );
     }
 
+    const { data: existing } = await ctx.supabase
+      .from('keyword_relations')
+      .select('from_keyword_id, to_keyword_id')
+      .eq('id', id)
+      .eq('organization_id', ctx.org.id)
+      .maybeSingle();
+
     const { error } = await ctx.supabase
       .from('keyword_relations')
       .delete()
@@ -125,6 +138,13 @@ export async function DELETE(req: NextRequest) {
     if (error) throw error;
 
     await audit(ctx, 'relation.delete', { type: 'relation', id });
+
+    if (existing) {
+      await Promise.all([
+        recomputeKeywordCompleteness(ctx.supabase, ctx.org.id, existing.from_keyword_id),
+        recomputeKeywordCompleteness(ctx.supabase, ctx.org.id, existing.to_keyword_id),
+      ]);
+    }
 
     return NextResponse.json({ data: { deleted: true }, error: null });
   } catch (error) {
