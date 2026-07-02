@@ -1,8 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireOrgContext, audit } from '@/lib/auth';
 import { apiError } from '@/lib/api';
+import { recomputeKeywordCompleteness } from '@/lib/ontology/completeness';
 
 type RouteParams = { params: Promise<{ id: string }> };
+
+const UPDATABLE_FIELDS = [
+  'title', 'definition', 'explanation', 'examples', 'synonyms', 'rules',
+  'labels_json', 'parent_id', 'icon', 'color', 'sort_order',
+  'keyword_type', 'status', 'owner_member_id',
+] as const;
 
 // GET /api/keywords/[id] - Get a single keyword with relations and assets
 export async function GET(req: NextRequest, { params }: RouteParams) {
@@ -55,16 +62,24 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
   try {
     const ctx = await requireOrgContext('edit_keywords');
     const { id } = await params;
-    const body = await req.json();
+    const body = (await req.json()) as Record<string, any>;
 
-    // Never allow tenancy or identity fields through the update payload
-    const { organization_id, created_by, id: _id, ...updates } = body as Record<string, any>;
+    // Whitelist: tenancy, identity, and computed fields never come from the payload
+    const updates: Record<string, any> = {};
+    for (const field of UPDATABLE_FIELDS) {
+      if (field in body) updates[field] = body[field];
+    }
 
     if (updates.title) {
       updates.slug = updates.title
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/(^-|-$)/g, '');
+    }
+
+    // A keyword cannot be its own parent
+    if (updates.parent_id === id) {
+      return NextResponse.json({ data: null, error: 'A keyword cannot be its own parent' }, { status: 400 });
     }
 
     const { data: keyword, error } = await ctx.supabase
@@ -76,6 +91,25 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
       .single();
 
     if (error) throw error;
+
+    // Attribute the version snapshot the trigger just created to this user
+    const { data: latestVersion } = await ctx.supabase
+      .from('keyword_versions')
+      .select('id')
+      .eq('keyword_id', id)
+      .is('changed_by', null)
+      .order('version_no', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (latestVersion) {
+      await ctx.supabase
+        .from('keyword_versions')
+        .update({ changed_by: ctx.user.id })
+        .eq('id', latestVersion.id);
+    }
+
+    const newScore = await recomputeKeywordCompleteness(ctx.supabase, ctx.org.id, id);
+    if (newScore !== null) keyword.completeness_score = newScore;
 
     await audit(ctx, 'keyword.update', { type: 'keyword', id }, { fields: Object.keys(updates) });
 

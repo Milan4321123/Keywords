@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireOrgContext, audit } from '@/lib/auth';
 import { apiError } from '@/lib/api';
+import { computeCompleteness } from '@/lib/ontology/completeness';
+
+const KEYWORD_TYPES = [
+  'concept', 'process', 'metric', 'dataset', 'document_type', 'role',
+  'task_type', 'workflow_step', 'department', 'entity', 'kpi',
+  'report_type', 'risk', 'rule', 'skill',
+];
+const KEYWORD_STATUSES = ['draft', 'active', 'archived'];
 
 // GET /api/keywords - Get all keywords for the active organization
 export async function GET(req: NextRequest) {
@@ -54,6 +62,14 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const { score } = computeCompleteness({
+      definition: body.definition,
+      explanation: body.explanation,
+      examples: body.examples,
+      synonyms: body.synonyms,
+      rules: body.rules,
+    });
+
     const { data: keyword, error } = await ctx.supabase
       .from('keywords')
       .insert({
@@ -61,6 +77,8 @@ export async function POST(req: NextRequest) {
         title: body.title,
         slug: slug,
         parent_id: body.parent_id || null,
+        keyword_type: KEYWORD_TYPES.includes(body.keyword_type) ? body.keyword_type : 'concept',
+        status: KEYWORD_STATUSES.includes(body.status) ? body.status : 'active',
         definition: body.definition || null,
         explanation: body.explanation || null,
         examples: body.examples || [],
@@ -70,6 +88,7 @@ export async function POST(req: NextRequest) {
         icon: body.icon || null,
         color: body.color || null,
         sort_order: body.sort_order || 0,
+        completeness_score: score,
         created_by: ctx.user.id,
       })
       .select()
