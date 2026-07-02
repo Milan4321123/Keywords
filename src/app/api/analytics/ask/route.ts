@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { SupabaseClient } from '@supabase/supabase-js';
+import { requireOrgContext, audit, authErrorResponse } from '@/lib/auth';
 import { openai } from '@/lib/openai';
 import { runTableQuery, TableQuerySpec } from '@/lib/analytics';
 import { AnalyticsAskRequest } from '@/types';
@@ -7,7 +8,7 @@ import { AnalyticsAskRequest } from '@/types';
 export const runtime = 'nodejs';
 
 async function fetchRows(params: {
-  supabase: ReturnType<typeof createServerClient>;
+  supabase: SupabaseClient;
   datasetTableId: string;
   maxRows: number;
 }) {
@@ -38,7 +39,8 @@ async function fetchRows(params: {
 // POST /api/analytics/ask - Analytics chat grounded in dataset rows via tool calls
 export async function POST(req: NextRequest) {
   try {
-    const supabase = createServerClient();
+    const ctx = await requireOrgContext('run_ai');
+    const supabase = ctx.supabase;
     const body = (await req.json()) as AnalyticsAskRequest;
 
     if (!body?.question?.trim()) {
@@ -54,12 +56,13 @@ export async function POST(req: NextRequest) {
       .select(
         `
         *,
-        dataset:datasets(*, asset:assets(*)),
+        dataset:datasets!inner(*, asset:assets(*)),
         columns:dataset_columns(*)
       `
       )
       .eq('id', body.dataset_table_id)
-      .single();
+      .eq('dataset.organization_id', ctx.org.id)
+      .maybeSingle();
     if (tableError) throw tableError;
     if (!table) return NextResponse.json({ error: 'Table not found' }, { status: 404 });
 
@@ -190,6 +193,10 @@ export async function POST(req: NextRequest) {
 
       if (!msg.tool_calls || msg.tool_calls.length === 0) {
         const answer = msg.content || '';
+        await audit(ctx, 'ai.analytics_ask', { type: 'dataset_table', id: table.id }, {
+          question: body.question.slice(0, 500),
+          tool_calls: toolResults.length,
+        });
         return NextResponse.json({ answer, tool_results: toolResults });
       }
 
@@ -220,6 +227,10 @@ export async function POST(req: NextRequest) {
       tool_results: toolResults,
     });
   } catch (err) {
+    const authErr = authErrorResponse(err);
+    if (authErr) {
+      return NextResponse.json({ error: authErr.message }, { status: authErr.status });
+    }
     console.error('Error in analytics ask:', err);
     const anyErr = err as any;
     if (anyErr?.code === 'PGRST205') {

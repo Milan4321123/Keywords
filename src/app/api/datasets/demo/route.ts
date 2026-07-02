@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { SupabaseClient } from '@supabase/supabase-js';
+import { requireOrgContext, audit, authErrorResponse } from '@/lib/auth';
 
 export const runtime = 'nodejs';
 
@@ -17,10 +18,10 @@ function pick<T>(arr: T[], idx: number): T {
   return arr[idx % arr.length];
 }
 
-async function insertInChunks<T extends Record<string, any>>(
-  supabase: ReturnType<typeof createServerClient>,
+async function insertInChunks(
+  supabase: SupabaseClient,
   table: string,
-  rows: T[],
+  rows: Record<string, any>[],
   chunkSize: number
 ) {
   for (let i = 0; i < rows.length; i += chunkSize) {
@@ -33,14 +34,17 @@ async function insertInChunks<T extends Record<string, any>>(
 // POST /api/datasets/demo - Create a demo dataset/table with sample project data
 export async function POST(_req: NextRequest) {
   try {
-    const supabase = createServerClient();
+    const ctx = await requireOrgContext('upload_assets');
+    const supabase = ctx.supabase;
 
     const { data: dataset, error: datasetError } = await supabase
       .from('datasets')
       .insert({
+        organization_id: ctx.org.id,
         asset_id: null,
         title: 'Demo: Project Operations',
         description: 'Seeded demo data for testing grounded analytics chat (projects, trades, invoices, approval delays).',
+        created_by: ctx.user.id,
       })
       .select()
       .single();
@@ -141,8 +145,14 @@ export async function POST(_req: NextRequest) {
 
     await insertInChunks(supabase, 'dataset_rows', rows, 500);
 
+    await audit(ctx, 'dataset.import', { type: 'dataset', id: dataset.id }, { seeded: true });
+
     return NextResponse.json({ data: { dataset, table_id: table.id }, error: null });
   } catch (err) {
+    const authErr = authErrorResponse(err);
+    if (authErr) {
+      return NextResponse.json({ data: null, error: authErr.message }, { status: authErr.status });
+    }
     console.error('Error creating demo dataset:', err);
     const anyErr = err as any;
     if (anyErr?.code === 'PGRST205') {

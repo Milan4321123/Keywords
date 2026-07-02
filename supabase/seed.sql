@@ -153,6 +153,11 @@ ids as (
 )
 select 1;
 
+-- Set demo scope on seeded assets (used by org scoping in retrieval)
+update assets
+set meta_json = coalesce(meta_json, '{}'::jsonb) || jsonb_build_object('org_id', 'demo')
+where file_name like 'seed__%';
+
 -- Link assets to keywords
 with ids as (
   select

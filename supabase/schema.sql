@@ -24,7 +24,9 @@ create table keywords (
   sort_order integer default 0,
   created_by uuid,
   created_at timestamptz default now(),
-  updated_at timestamptz default now()
+  updated_at timestamptz default now(),
+  check (char_length(trim(title)) > 0),
+  check (char_length(trim(slug)) > 0)
 );
 
 -- Index for parent-child queries
@@ -62,7 +64,8 @@ create table keyword_relations (
   created_at timestamptz default now(),
   
   -- Prevent duplicate relations
-  unique(from_keyword_id, relation_type, to_keyword_id)
+  unique(from_keyword_id, relation_type, to_keyword_id),
+  check (from_keyword_id <> to_keyword_id)
 );
 
 create index idx_relations_from on keyword_relations(from_keyword_id);
@@ -102,6 +105,9 @@ create table assets (
 create index idx_assets_type on assets(file_type);
 create index idx_assets_processed on assets(processed);
 
+-- Optional scoping helpers (e.g. org_id stored in meta_json)
+create index if not exists idx_assets_org_id on assets ((meta_json->>'org_id'));
+
 -- =====================================================
 -- KEYWORD_ASSETS TABLE (Many-to-Many Link)
 -- =====================================================
@@ -132,11 +138,13 @@ create table chunks (
   embedding vector(1536), -- OpenAI ada-002 embedding dimension
   token_count integer,
   meta_json jsonb default '{}', -- page number, section, etc.
-  created_at timestamptz default now()
+  created_at timestamptz default now(),
+  unique(asset_id, chunk_index)
 );
 
 create index idx_chunks_asset on chunks(asset_id);
 create index idx_chunks_keyword on chunks(keyword_id);
+create index idx_chunks_asset_chunk_index on chunks(asset_id, chunk_index);
 
 -- Full-text search support (hybrid retrieval)
 alter table chunks
@@ -199,7 +207,8 @@ create or replace function match_chunks(
   query_embedding vector(1536),
   match_threshold float default 0.7,
   match_count int default 10,
-  filter_keyword_ids uuid[] default null
+  filter_keyword_ids uuid[] default null,
+  filter_org_id text default null
 )
 returns table (
   id uuid,
@@ -225,7 +234,11 @@ begin
     c.meta_json,
     1 - (c.embedding <=> query_embedding) as similarity
   from chunks c
+  left join assets a on a.id = c.asset_id
   where 
+    query_embedding is not null
+    and c.embedding is not null
+    and
     (
       filter_keyword_ids is null
       or c.keyword_id = any(filter_keyword_ids)
@@ -235,6 +248,10 @@ begin
         where ka.asset_id = c.asset_id
           and ka.keyword_id = any(filter_keyword_ids)
       )
+    )
+    and (
+      filter_org_id is null
+      or a.meta_json->>'org_id' = filter_org_id
     )
     and 1 - (c.embedding <=> query_embedding) > match_threshold
   order by c.embedding <=> query_embedding
@@ -249,6 +266,7 @@ create or replace function match_chunks_hybrid(
   match_threshold float default 0.65,
   match_count int default 20,
   filter_keyword_ids uuid[] default null,
+  filter_org_id text default null,
   weight_vector float default 0.7,
   weight_text float default 0.3
 )
@@ -267,7 +285,11 @@ as $$
 declare
   q tsquery;
 begin
-  q := websearch_to_tsquery('english', coalesce(query_text, ''));
+  if coalesce(trim(query_text), '') <> '' then
+    q := websearch_to_tsquery('english', query_text);
+  else
+    q := null;
+  end if;
 
   return query
   with scored as (
@@ -284,6 +306,7 @@ begin
       -- Text rank is typically small; clamp to [0, 1] for blending
       least(1, ts_rank_cd(c.search_vector, q)) as text_rank
     from chunks c
+    left join assets a on a.id = c.asset_id
     where
       (
         filter_keyword_ids is null
@@ -296,8 +319,12 @@ begin
         )
       )
       and (
+        filter_org_id is null
+        or a.meta_json->>'org_id' = filter_org_id
+      )
+      and (
         -- match on text OR on vectors above threshold
-        (coalesce(query_text, '') <> '' and c.search_vector @@ q)
+        (q is not null and c.search_vector @@ q)
         or coalesce(greatest(0, 1 - (c.embedding <=> query_embedding)), 0) > match_threshold
       )
   )

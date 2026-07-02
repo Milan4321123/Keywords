@@ -167,11 +167,11 @@ export const FileUpload: React.FC<FileUploadProps> = ({
         onDrop={handleDrop}
         onClick={() => fileInputRef.current?.click()}
         className={`
-          relative border-2 border-dashed rounded-xl p-8 text-center cursor-pointer
-          transition-all duration-200
+          relative border-2 border-dashed rounded-2xl p-8 text-center cursor-pointer
+          transition-all duration-200 group
           ${isDragging 
-            ? 'border-blue-500 bg-blue-50' 
-            : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50'
+            ? 'border-blue-400 bg-blue-50/50 shadow-inner' 
+            : 'border-slate-200 hover:border-blue-300 hover:bg-slate-50/50 bg-slate-50/30'
           }
         `}
       >
@@ -184,55 +184,59 @@ export const FileUpload: React.FC<FileUploadProps> = ({
           accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.png,.jpg,.jpeg,.gif,.txt"
         />
         
-        <Upload className={`w-10 h-10 mx-auto mb-3 ${isDragging ? 'text-blue-500' : 'text-gray-400'}`} />
+        <div className={`w-12 h-12 mx-auto mb-4 rounded-xl flex items-center justify-center transition-colors ${
+          isDragging ? 'bg-blue-100 text-blue-600' : 'bg-white shadow-sm text-slate-400 group-hover:text-blue-500 group-hover:bg-blue-50'
+        }`}>
+          <Upload className="w-6 h-6" />
+        </div>
         
-        <p className="text-sm font-medium text-gray-700">
-          {isDragging ? 'Drop files here' : 'Drop files or click to upload'}
+        <p className="text-sm font-bold text-slate-700 mb-1">
+          {isDragging ? 'Drop files here' : 'Click or drag files to upload'}
         </p>
-        <p className="text-xs text-gray-500 mt-1">
+        <p className="text-xs font-medium text-slate-500">
           PDF, Images, Excel, Word, Text files
         </p>
       </div>
 
       {/* Uploading Files */}
       {uploadingFiles.length > 0 && (
-        <div className="space-y-2">
+        <div className="space-y-2 animate-in fade-in duration-300">
           {uploadingFiles.map((upload) => (
             <div
               key={upload.id}
-              className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg"
+              className="flex items-center gap-3 p-3 bg-white border border-slate-200 rounded-xl shadow-sm"
             >
-              <div className="flex-shrink-0">
+              <div className="flex-shrink-0 w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center">
                 {getFileIcon(getFileType(upload.file.type))}
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{upload.file.name}</p>
-                <div className="flex items-center gap-2 mt-1">
+                <p className="text-sm font-bold text-slate-700 truncate">{upload.file.name}</p>
+                <div className="flex items-center gap-2 mt-1.5">
                   {upload.status === 'uploading' && (
                     <>
-                      <div className="flex-1 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                      <div className="flex-1 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                         <div
                           className="h-full bg-blue-500 transition-all duration-200"
                           style={{ width: `${upload.progress}%` }}
                         />
                       </div>
-                      <span className="text-xs text-gray-500">{upload.progress}%</span>
+                      <span className="text-[10px] font-bold text-slate-500 w-8">{upload.progress}%</span>
                     </>
                   )}
                   {upload.status === 'processing' && (
-                    <span className="flex items-center gap-1 text-xs text-amber-600">
+                    <span className="flex items-center gap-1.5 text-xs font-medium text-amber-600 bg-amber-50 px-2 py-0.5 rounded-md">
                       <Loader2 className="w-3 h-3 animate-spin" />
                       Processing...
                     </span>
                   )}
                   {upload.status === 'done' && (
-                    <span className="flex items-center gap-1 text-xs text-green-600">
+                    <span className="flex items-center gap-1.5 text-xs font-medium text-green-600 bg-green-50 px-2 py-0.5 rounded-md">
                       <CheckCircle className="w-3 h-3" />
                       Uploaded
                     </span>
                   )}
                   {upload.status === 'error' && (
-                    <span className="flex items-center gap-1 text-xs text-red-600">
+                    <span className="flex items-center gap-1.5 text-xs font-medium text-red-600 bg-red-50 px-2 py-0.5 rounded-md">
                       <AlertCircle className="w-3 h-3" />
                       {upload.error}
                     </span>
@@ -246,45 +250,52 @@ export const FileUpload: React.FC<FileUploadProps> = ({
 
       {/* Existing Assets */}
       {existingAssets.length > 0 && (
-        <div className="space-y-2">
-          <h4 className="text-sm font-medium text-gray-700">
+        <div className="space-y-3 animate-in fade-in duration-300">
+          <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
             Attached Files ({existingAssets.length})
           </h4>
           <div className="grid gap-2">
             {existingAssets.map((asset) => (
               <div
                 key={asset.id}
-                className="flex items-center gap-3 p-3 bg-white border rounded-lg hover:border-gray-300 transition-colors"
+                className="group flex items-center gap-3 p-3 bg-white border border-slate-200 rounded-xl hover:border-blue-300 hover:shadow-sm transition-all duration-200"
               >
-                <div className="flex-shrink-0">
+                <div className="flex-shrink-0 w-10 h-10 bg-slate-50 rounded-lg flex items-center justify-center overflow-hidden">
                   {asset.thumbnail_url ? (
                     <img
                       src={asset.thumbnail_url}
                       alt={asset.file_name}
-                      className="w-10 h-10 object-cover rounded"
+                      className="w-full h-full object-cover"
                     />
                   ) : (
                     getFileIcon(asset.file_type)
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{asset.file_name}</p>
-                  <p className="text-xs text-gray-500">
-                    {formatFileSize(asset.file_size)}
-                    {asset.processed && ' • Processed'}
-                  </p>
+                  <p className="text-sm font-bold text-slate-700 truncate group-hover:text-blue-600 transition-colors">{asset.file_name}</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-xs font-medium text-slate-500">
+                      {formatFileSize(asset.file_size)}
+                    </span>
+                    {asset.processed && (
+                      <>
+                        <span className="w-1 h-1 rounded-full bg-slate-300" />
+                        <span className="text-[10px] font-bold text-green-600 uppercase tracking-wider bg-green-50 px-1.5 py-0.5 rounded">Processed</span>
+                      </>
+                    )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
                     onClick={() => onViewAsset(asset)}
-                    className="p-2 text-gray-400 hover:text-blue-500 hover:bg-blue-50 rounded-lg"
+                    className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                     title="View"
                   >
                     <Eye className="w-4 h-4" />
                   </button>
                   <button
                     onClick={() => onRemove(asset.id)}
-                    className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 rounded-lg"
+                    className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                     title="Remove"
                   >
                     <Trash2 className="w-4 h-4" />

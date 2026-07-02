@@ -8,6 +8,7 @@ interface KeywordTreeProps {
   keywords: Keyword[];
   selectedId: string | null;
   onSelect: (keyword: Keyword) => void;
+  onEdit?: (keyword: Keyword) => void;
   onAddChild: (parentId: string | null) => void;
   onDelete?: (keyword: Keyword) => void;
 }
@@ -48,9 +49,12 @@ const TreeNode: React.FC<TreeNodeProps> = ({
     <div className="select-none">
       <div
         className={`
-          flex items-center gap-1 py-1.5 px-2 rounded-md cursor-pointer
-          hover:bg-gray-100 transition-colors group
-          ${isSelected ? 'bg-blue-50 text-blue-700' : ''}
+          flex items-center gap-1.5 py-1.5 px-2 rounded-xl cursor-pointer
+          transition-all duration-200 group
+          ${isSelected 
+            ? 'bg-blue-50 text-blue-700 shadow-sm border border-blue-100' 
+            : 'hover:bg-slate-50 text-slate-700 border border-transparent hover:border-slate-200'
+          }
         `}
         style={{ paddingLeft: `${level * 16 + 8}px` }}
         onClick={() => onSelect(keyword)}
@@ -58,16 +62,16 @@ const TreeNode: React.FC<TreeNodeProps> = ({
       >
         {/* Expand/collapse button */}
         <button
-          className={`p-0.5 rounded hover:bg-gray-200 ${!hasChildren ? 'invisible' : ''}`}
+          className={`p-0.5 rounded-md hover:bg-slate-200 transition-colors ${!hasChildren ? 'invisible' : ''}`}
           onClick={(e) => {
             e.stopPropagation();
             onToggle(keyword.id);
           }}
         >
           {isExpanded ? (
-            <ChevronDown className="w-4 h-4 text-gray-500" />
+            <ChevronDown className="w-4 h-4 text-slate-400" />
           ) : (
-            <ChevronRight className="w-4 h-4 text-gray-500" />
+            <ChevronRight className="w-4 h-4 text-slate-400" />
           )}
         </button>
 
@@ -75,43 +79,43 @@ const TreeNode: React.FC<TreeNodeProps> = ({
         {getIcon()}
 
         {/* Title */}
-        <span className="flex-1 text-sm font-medium truncate">
+        <span className={`flex-1 text-sm truncate ${isSelected ? 'font-bold' : 'font-medium'}`}>
           {keyword.title}
         </span>
 
         {/* Color indicator */}
         {keyword.color && (
           <div
-            className="w-2 h-2 rounded-full"
+            className="w-2 h-2 rounded-full shadow-sm"
             style={{ backgroundColor: keyword.color }}
           />
         )}
 
         {/* Action buttons (visible on hover) */}
-        <div className="hidden group-hover:flex items-center gap-1">
+        <div className="hidden group-hover:flex items-center gap-0.5">
           <button
-            className="p-1 rounded hover:bg-gray-200"
+            className="p-1 rounded-md hover:bg-slate-200 text-slate-400 hover:text-blue-600 transition-colors"
             onClick={(e) => {
               e.stopPropagation();
               onAddChild(keyword.id);
             }}
             title="Add sub-keyword"
           >
-            <Plus className="w-3 h-3 text-gray-500" />
+            <Plus className="w-3.5 h-3.5" />
           </button>
           <button
-            className="p-1 rounded hover:bg-gray-200"
+            className="p-1 rounded-md hover:bg-slate-200 text-slate-400 hover:text-slate-700 transition-colors"
             onClick={(e) => onContextMenu(e, keyword)}
             title="More options"
           >
-            <MoreHorizontal className="w-3 h-3 text-gray-500" />
+            <MoreHorizontal className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
 
       {/* Children */}
       {hasChildren && isExpanded && (
-        <div className="tree-children">
+        <div className="tree-children animate-in slide-in-from-top-1 duration-200">
           {keyword.children!.map((child) => (
             <TreeNode
               key={child.id}
@@ -135,6 +139,7 @@ export const KeywordTree: React.FC<KeywordTreeProps> = ({
   keywords,
   selectedId,
   onSelect,
+  onEdit,
   onAddChild,
   onDelete,
 }) => {
@@ -200,28 +205,30 @@ export const KeywordTree: React.FC<KeywordTreeProps> = ({
   return (
     <div className="relative" onClick={closeContextMenu}>
       {/* Header with add button */}
-      <div className="flex items-center justify-between px-3 py-2 border-b">
-        <span className="text-sm font-semibold text-gray-600">Keywords</span>
+      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100 bg-slate-50/50 rounded-t-2xl">
+        <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Ontology Explorer</span>
         <button
-          className="p-1 rounded hover:bg-gray-100"
+          className="p-1.5 rounded-lg hover:bg-white hover:shadow-sm text-slate-400 hover:text-blue-600 transition-all"
           onClick={() => onAddChild(null)}
-          title="Add root keyword"
+          title="Add root concept"
         >
-          <Plus className="w-4 h-4 text-gray-500" />
+          <Plus className="w-4 h-4" />
         </button>
       </div>
 
       {/* Tree */}
-      <div className="py-2 overflow-auto max-h-[calc(100vh-200px)]">
+      <div className="py-3 px-2 overflow-auto max-h-[calc(100vh-200px)] custom-scrollbar">
         {treeData.length === 0 ? (
-          <div className="px-4 py-8 text-center text-gray-400 text-sm">
-            No keywords yet.
-            <br />
+          <div className="px-4 py-12 text-center">
+            <div className="w-12 h-12 bg-slate-50 rounded-xl flex items-center justify-center mx-auto mb-3 border border-slate-100">
+              <Folder className="w-6 h-6 text-slate-300" />
+            </div>
+            <p className="text-sm font-medium text-slate-500 mb-2">No concepts yet.</p>
             <button
-              className="mt-2 text-blue-500 hover:underline"
+              className="text-sm font-bold text-blue-600 hover:text-blue-700 hover:underline transition-colors"
               onClick={() => onAddChild(null)}
             >
-              Add your first keyword
+              Add your first concept
             </button>
           </div>
         ) : (
@@ -244,30 +251,30 @@ export const KeywordTree: React.FC<KeywordTreeProps> = ({
       {/* Context Menu */}
       {contextMenu && (
         <div
-          className="fixed bg-white border rounded-lg shadow-lg py-1 z-50 min-w-[150px]"
+          className="fixed bg-white border border-slate-200 rounded-xl shadow-xl py-1.5 z-50 min-w-[160px] animate-in zoom-in-95 duration-100"
           style={{ left: contextMenu.x, top: contextMenu.y }}
         >
           <button
-            className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100"
+            className="w-full px-4 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-blue-600 transition-colors"
             onClick={() => {
               onAddChild(contextMenu.keyword.id);
               closeContextMenu();
             }}
           >
-            Add sub-keyword
+            Add sub-concept
           </button>
           <button
-            className="w-full px-4 py-2 text-left text-sm hover:bg-gray-100"
+            className="w-full px-4 py-2 text-left text-sm font-medium text-slate-700 hover:bg-slate-50 hover:text-blue-600 transition-colors"
             onClick={() => {
-              onSelect(contextMenu.keyword);
+              (onEdit ?? onSelect)(contextMenu.keyword);
               closeContextMenu();
             }}
           >
-            Edit keyword
+            Edit concept
           </button>
           {onDelete && (
             <button
-              className="w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+              className="w-full px-4 py-2 text-left text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"
               onClick={() => {
                 onDelete(contextMenu.keyword);
                 closeContextMenu();

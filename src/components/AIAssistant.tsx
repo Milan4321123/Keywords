@@ -22,7 +22,12 @@ import { ChatMessage, Keyword, AskAIResponse, KeywordSuggestion } from '@/types'
 
 interface AIAssistantProps {
   keywords: Keyword[];
+  /**
+   * Keyword IDs used as context for /api/ask.
+   * If provided, the component behaves as a controlled component.
+   */
   selectedKeywordIds?: string[];
+  onSelectedKeywordIdsChange?: (ids: string[]) => void;
   onSelectKeyword?: (keywordId: string) => void;
   onKeywordsCreated?: () => void; // Callback to refresh keywords list
 }
@@ -30,13 +35,14 @@ interface AIAssistantProps {
 export const AIAssistant: React.FC<AIAssistantProps> = ({
   keywords,
   selectedKeywordIds = [],
+  onSelectedKeywordIdsChange,
   onSelectKeyword,
   onKeywordsCreated,
 }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [contextKeywords, setContextKeywords] = useState<string[]>(selectedKeywordIds);
+  const [internalContextKeywords, setInternalContextKeywords] = useState<string[]>(selectedKeywordIds);
   const [mode, setMode] = useState<'ask' | 'generate'>('ask');
   const [pendingSuggestions, setPendingSuggestions] = useState<KeywordSuggestion[] | null>(null);
   const [suggestionExplanation, setSuggestionExplanation] = useState<string>('');
@@ -50,9 +56,7 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  useEffect(() => {
-    setContextKeywords(selectedKeywordIds);
-  }, [selectedKeywordIds]);
+  const contextKeywords = onSelectedKeywordIdsChange ? selectedKeywordIds : internalContextKeywords;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -310,11 +314,15 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({
   };
 
   const toggleKeywordContext = (keywordId: string) => {
-    setContextKeywords((prev) =>
-      prev.includes(keywordId)
-        ? prev.filter((id) => id !== keywordId)
-        : [...prev, keywordId]
-    );
+    const next = contextKeywords.includes(keywordId)
+      ? contextKeywords.filter((id) => id !== keywordId)
+      : [...contextKeywords, keywordId];
+
+    if (onSelectedKeywordIdsChange) {
+      onSelectedKeywordIdsChange(next);
+    } else {
+      setInternalContextKeywords(next);
+    }
   };
 
   const clearChat = () => {
@@ -390,22 +398,22 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-white rounded-xl border">
+    <div className="flex flex-col h-full bg-white">
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b bg-gradient-to-r from-blue-50 to-indigo-50">
-        <div className="flex items-center gap-2">
-          <div className="p-2 bg-blue-500 rounded-lg">
-            <Sparkles className="w-4 h-4 text-white" />
+      <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100 bg-slate-50/50 shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center shadow-sm">
+            <Sparkles className="w-4 h-4" />
           </div>
           <div>
-            <h3 className="font-semibold text-gray-800">AI Assistant</h3>
-            <p className="text-xs text-gray-500">Ask questions or generate keywords</p>
+            <h3 className="text-sm font-bold text-slate-800">AI Assistant</h3>
+            <p className="text-[10px] text-slate-500 font-medium uppercase tracking-wider">Powered by Ontology</p>
           </div>
         </div>
         {messages.length > 0 && (
           <button
             onClick={clearChat}
-            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"
+            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-200/50 rounded-xl transition-colors"
             title="Clear chat"
           >
             <RefreshCw className="w-4 h-4" />
@@ -414,14 +422,14 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({
       </div>
 
       {/* Mode Toggle */}
-      <div className="px-4 py-2 border-b bg-gray-50">
-        <div className="flex gap-2">
+      <div className="px-5 py-3 border-b border-slate-100 bg-white shrink-0">
+        <div className="flex gap-2 p-1 bg-slate-100/80 rounded-xl">
           <button
             onClick={() => setMode('ask')}
-            className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-all duration-200 ${
               mode === 'ask'
-                ? 'bg-blue-500 text-white'
-                : 'bg-white text-gray-600 hover:bg-gray-100'
+                ? 'bg-white text-blue-600 shadow-sm ring-1 ring-slate-200/50'
+                : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'
             }`}
           >
             <Bot className="w-4 h-4" />
@@ -429,90 +437,103 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({
           </button>
           <button
             onClick={() => setMode('generate')}
-            className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+            className={`flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold transition-all duration-200 ${
               mode === 'generate'
-                ? 'bg-purple-500 text-white'
-                : 'bg-white text-gray-600 hover:bg-gray-100'
+                ? 'bg-white text-purple-600 shadow-sm ring-1 ring-slate-200/50'
+                : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'
             }`}
           >
             <Wand2 className="w-4 h-4" />
-            Generate Keywords
+            Generate Concepts
           </button>
         </div>
       </div>
 
       {/* Context Keywords Selector (only for ask mode) */}
       {mode === 'ask' && (
-        <div className="px-4 py-2 border-b bg-gray-50">
-          <p className="text-xs text-gray-500 mb-2">Context (AI will focus on these topics):</p>
-          <div className="flex flex-wrap gap-1">
-            {keywords.slice(0, 10).map((kw) => (
+        <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/50 shrink-0">
+          <div className="flex items-center gap-2 mb-2">
+            <FolderTree className="w-3.5 h-3.5 text-slate-400" />
+            <p className="text-xs font-semibold text-slate-600">Active Context</p>
+          </div>
+          <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto custom-scrollbar pr-1">
+            {keywords.slice(0, 15).map((kw) => (
               <button
                 key={kw.id}
                 onClick={() => toggleKeywordContext(kw.id)}
                 className={`
-                  px-2 py-1 text-xs rounded-full border transition-colors
+                  px-2.5 py-1 text-xs font-medium rounded-lg border transition-all duration-200
                   ${contextKeywords.includes(kw.id)
-                    ? 'bg-blue-100 border-blue-300 text-blue-700'
-                    : 'bg-white border-gray-200 text-gray-600 hover:border-gray-300'
+                    ? 'bg-blue-50 border-blue-200 text-blue-700 shadow-sm'
+                    : 'bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50'
                   }
                 `}
               >
                 {kw.title}
               </button>
             ))}
+            {keywords.length === 0 && (
+              <span className="text-xs text-slate-400 italic">No concepts available</span>
+            )}
           </div>
         </div>
       )}
 
       {/* Messages */}
-      <div className="flex-1 overflow-auto p-4 space-y-4">
+      <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-6 bg-slate-50/30">
         {messages.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-center">
+          <div className="h-full flex flex-col items-center justify-center text-center animate-in fade-in duration-500">
             {mode === 'ask' ? (
               <>
-                <Bot className="w-12 h-12 text-gray-300 mb-4" />
-                <h4 className="font-medium text-gray-600 mb-2">
-                  Ask me anything about your company knowledge
+                <div className="w-16 h-16 bg-blue-50 rounded-2xl flex items-center justify-center mb-5 shadow-inner">
+                  <Bot className="w-8 h-8 text-blue-500" />
+                </div>
+                <h4 className="text-lg font-bold text-slate-800 mb-2">
+                  Ask your Ontology
                 </h4>
-                <p className="text-sm text-gray-400 mb-6 max-w-md">
-                  I can answer questions using your keyword definitions, relationships, and uploaded documents.
+                <p className="text-sm text-slate-500 mb-8 max-w-[280px] leading-relaxed">
+                  I can answer questions using your concept definitions, relationships, and uploaded documents.
                 </p>
                 
                 {/* Suggested Questions */}
-                <div className="w-full max-w-md space-y-2">
-                  <p className="text-xs text-gray-400 uppercase tracking-wide">Try asking:</p>
+                <div className="w-full max-w-sm space-y-2">
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Suggested Questions</p>
                   {suggestedQuestions.map((q, i) => (
                     <button
                       key={i}
                       onClick={() => setInput(q)}
-                      className="w-full text-left px-4 py-3 bg-gray-50 hover:bg-gray-100 rounded-lg text-sm text-gray-600 transition-colors"
+                      className="w-full text-left px-4 py-3 bg-white border border-slate-200 hover:border-blue-300 hover:shadow-sm rounded-xl text-sm font-medium text-slate-600 hover:text-blue-600 transition-all duration-200 group flex items-center justify-between"
                     >
-                      <ChevronRight className="w-4 h-4 inline mr-2 text-gray-400" />
-                      {q}
+                      <span className="truncate pr-2">{q}</span>
+                      <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-blue-400 shrink-0" />
                     </button>
                   ))}
                 </div>
               </>
             ) : (
               <>
-                <FolderTree className="w-12 h-12 text-purple-300 mb-4" />
-                <h4 className="font-medium text-gray-600 mb-2">
-                  Generate Keywords with AI
+                <div className="w-16 h-16 bg-purple-50 rounded-2xl flex items-center justify-center mb-5 shadow-inner">
+                  <FolderTree className="w-8 h-8 text-purple-500" />
+                </div>
+                <h4 className="text-lg font-bold text-slate-800 mb-2">
+                  Generate Concepts
                 </h4>
-                <p className="text-sm text-gray-400 mb-6 max-w-md">
-                  Enter a topic and I'll suggest a structured hierarchy of keywords with definitions. You can review and confirm before creating them.
+                <p className="text-sm text-slate-500 mb-8 max-w-[280px] leading-relaxed">
+                  Enter a topic and I'll suggest a structured hierarchy of concepts with definitions.
                 </p>
-                <div className="w-full max-w-md space-y-2">
-                  <p className="text-xs text-gray-400 uppercase tracking-wide">Try generating for:</p>
+                <div className="w-full max-w-sm space-y-2">
+                  <p className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Suggested Topics</p>
                   {suggestedTopics.map((topic, i) => (
                     <button
                       key={i}
                       onClick={() => setInput(topic)}
-                      className="w-full text-left px-4 py-3 bg-purple-50 hover:bg-purple-100 rounded-lg text-sm text-purple-600 transition-colors"
+                      className="w-full text-left px-4 py-3 bg-white border border-slate-200 hover:border-purple-300 hover:shadow-sm rounded-xl text-sm font-medium text-slate-600 hover:text-purple-600 transition-all duration-200 group flex items-center justify-between"
                     >
-                      <Wand2 className="w-4 h-4 inline mr-2 text-purple-400" />
-                      {topic}
+                      <span className="flex items-center gap-2 truncate pr-2">
+                        <Wand2 className="w-4 h-4 text-slate-300 group-hover:text-purple-400 shrink-0" />
+                        {topic}
+                      </span>
+                      <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-purple-400 shrink-0" />
                     </button>
                   ))}
                 </div>
@@ -520,40 +541,50 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({
             )}
           </div>
         ) : (
-          <>
+          <div className="space-y-6">
             {messages.map((msg) => (
               <div
                 key={msg.id}
-                className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}
+                className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : ''} animate-in slide-in-from-bottom-2 duration-300`}
               >
-                {msg.role === 'assistant' && (
-                  <div className="flex-shrink-0 w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
-                    <Bot className="w-4 h-4 text-blue-600" />
-                  </div>
-                )}
+                <div className={`flex-shrink-0 w-8 h-8 rounded-xl flex items-center justify-center shadow-sm mt-1 ${
+                  msg.role === 'user' 
+                    ? 'bg-gradient-to-br from-blue-500 to-indigo-600 text-white' 
+                    : 'bg-white border border-slate-200 text-blue-600'
+                }`}>
+                  {msg.role === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
+                </div>
+                
                 <div
-                  className={`max-w-[80%] ${
+                  className={`max-w-[85%] ${
                     msg.role === 'user'
-                      ? 'bg-blue-500 text-white rounded-2xl rounded-br-md px-4 py-2'
-                      : 'bg-gray-100 rounded-2xl rounded-bl-md px-4 py-3'
+                      ? 'bg-blue-600 text-white rounded-2xl rounded-tr-sm px-5 py-3.5 shadow-sm'
+                      : 'bg-white border border-slate-200 text-slate-700 rounded-2xl rounded-tl-sm px-5 py-3.5 shadow-sm'
                   }`}
                 >
-                  <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                  <div className="text-sm leading-relaxed whitespace-pre-wrap font-medium">{msg.content}</div>
                   
                   {/* Sources */}
-                  {msg.role === 'assistant' && msg.sources_json.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-gray-200">
-                      <p className="text-xs text-gray-500 mb-2">Sources:</p>
-                      <div className="flex flex-wrap gap-1">
+                  {msg.role === 'assistant' && msg.sources_json && msg.sources_json.length > 0 && (
+                    <div className="mt-4 pt-3 border-t border-slate-100">
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Sources Used</p>
+                      <div className="flex flex-wrap gap-1.5">
                         {msg.sources_json.map((source, i) => (
                           <button
                             key={i}
-                            onClick={() => source.type === 'keyword' && onSelectKeyword?.(source.id)}
+                            onClick={() => {
+                              if (source.type !== 'keyword') return;
+                              if (onSelectedKeywordIdsChange) {
+                                toggleKeywordContext(source.id);
+                                return;
+                              }
+                              onSelectKeyword?.(source.id);
+                            }}
                             className={`
-                              inline-flex items-center gap-1 px-2 py-1 text-xs rounded
+                              inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-lg transition-colors
                               ${source.type === 'keyword'
-                                ? 'bg-blue-50 text-blue-600 hover:bg-blue-100'
-                                : 'bg-gray-50 text-gray-600'
+                                ? 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-100'
+                                : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200'
                               }
                             `}
                           >
@@ -569,38 +600,41 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({
                     </div>
                   )}
                 </div>
-                {msg.role === 'user' && (
-                  <div className="flex-shrink-0 w-8 h-8 bg-blue-500 rounded-lg flex items-center justify-center">
-                    <User className="w-4 h-4 text-white" />
-                  </div>
-                )}
               </div>
             ))}
             
             {/* Pending Suggestions Panel */}
             {pendingSuggestions && (
-              <div className="bg-purple-50 border border-purple-200 rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-3">
-                  <Wand2 className="w-5 h-5 text-purple-600" />
-                  <h4 className="font-semibold text-purple-800">Suggested Keywords</h4>
-                  <span className="text-xs text-purple-600 bg-purple-100 px-2 py-0.5 rounded-full">
-                    {selectedSuggestions.size} selected
-                  </span>
+              <div className="bg-white border border-purple-200 rounded-2xl p-5 shadow-sm shadow-purple-500/5 animate-in slide-in-from-bottom-4 duration-500 ml-11">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg bg-purple-100 text-purple-600 flex items-center justify-center">
+                      <Wand2 className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-slate-800">Suggested Concepts</h4>
+                      <p className="text-xs font-medium text-purple-600">
+                        {selectedSuggestions.size} selected for creation
+                      </p>
+                    </div>
+                  </div>
                 </div>
                 
                 {suggestionExplanation && (
-                  <p className="text-sm text-purple-700 mb-3">{suggestionExplanation}</p>
+                  <div className="mb-5 p-3 bg-purple-50/50 rounded-xl border border-purple-100">
+                    <p className="text-sm text-slate-600 leading-relaxed">{suggestionExplanation}</p>
+                  </div>
                 )}
 
                 {/* Parent keyword selector */}
-                <div className="mb-3">
-                  <label className="text-xs text-purple-600 block mb-1">
-                    Create under parent (optional):
+                <div className="mb-5">
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider block mb-2">
+                    Attach to Parent Concept (Optional)
                   </label>
                   <select
                     value={parentKeywordId || ''}
                     onChange={(e) => setParentKeywordId(e.target.value || null)}
-                    className="w-full px-3 py-2 text-sm border border-purple-200 rounded-lg bg-white"
+                    className="w-full px-4 py-2.5 text-sm font-medium border border-slate-200 rounded-xl bg-slate-50 focus:bg-white focus:ring-2 focus:ring-purple-500 focus:border-purple-300 transition-all text-slate-700"
                   >
                     <option value="">Root level (no parent)</option>
                     {keywords.map((kw) => (
@@ -610,35 +644,35 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({
                 </div>
 
                 {/* Suggestions list */}
-                <div className="space-y-1 max-h-60 overflow-auto mb-4">
-                  {pendingSuggestions.map(kw => renderSuggestion(kw))}
+                <div className="space-y-1.5 max-h-[300px] overflow-y-auto custom-scrollbar pr-2 mb-5">
+                  {pendingSuggestions?.map(kw => renderSuggestion(kw))}
                 </div>
 
                 {/* Action buttons */}
-                <div className="flex gap-2">
+                <div className="flex gap-2 pt-4 border-t border-slate-100">
+                  <button
+                    onClick={handleCancelSuggestions}
+                    disabled={isCreating}
+                    className="px-4 py-2.5 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                  >
+                    Cancel
+                  </button>
                   <button
                     onClick={handleConfirmKeywords}
                     disabled={isCreating || selectedSuggestions.size === 0}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium bg-purple-600 text-white rounded-xl hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shadow-purple-600/20 transition-all active:scale-[0.98]"
                   >
                     {isCreating ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin" />
-                        Creating...
+                        Creating Concepts...
                       </>
                     ) : (
                       <>
                         <Check className="w-4 h-4" />
-                        Create {selectedSuggestions.size} Keywords
+                        Create {selectedSuggestions.size} Concepts
                       </>
                     )}
-                  </button>
-                  <button
-                    onClick={handleCancelSuggestions}
-                    disabled={isCreating}
-                    className="px-4 py-2 text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-50"
-                  >
-                    <X className="w-4 h-4" />
                   </button>
                 </div>
               </div>
@@ -646,52 +680,61 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({
             
             {/* Loading indicator */}
             {isLoading && (
-              <div className="flex gap-3">
-                <div className="flex-shrink-0 w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+              <div className="flex gap-3 animate-in fade-in duration-300">
+                <div className="flex-shrink-0 w-8 h-8 bg-white border border-slate-200 rounded-xl flex items-center justify-center shadow-sm mt-1">
                   <Bot className="w-4 h-4 text-blue-600" />
                 </div>
-                <div className="bg-gray-100 rounded-2xl rounded-bl-md px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <Loader2 className="w-4 h-4 animate-spin text-gray-500" />
-                    <span className="text-sm text-gray-500">
-                      {mode === 'generate' ? 'Generating keywords...' : 'Thinking...'}
+                <div className="bg-white border border-slate-200 rounded-2xl rounded-tl-sm px-5 py-3.5 shadow-sm">
+                  <div className="flex items-center gap-3">
+                    <div className="flex gap-1">
+                      <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                      <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                      <span className="w-1.5 h-1.5 bg-blue-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                    </div>
+                    <span className="text-sm font-medium text-slate-500">
+                      {mode === 'generate' ? 'Generating concepts...' : 'Thinking...'}
                     </span>
                   </div>
                 </div>
               </div>
             )}
             
-            <div ref={messagesEndRef} />
-          </>
+            <div ref={messagesEndRef} className="h-1" />
+          </div>
         )}
       </div>
 
       {/* Input */}
-      <form onSubmit={handleSubmit} className="p-4 border-t">
-        <div className="flex gap-2">
-          <input
-            type="text"
+      <form onSubmit={handleSubmit} className="p-4 border-t border-slate-100 bg-white shrink-0">
+        <div className="relative flex items-end gap-2 bg-slate-50 border border-slate-200 rounded-2xl p-1.5 focus-within:ring-2 focus-within:ring-blue-500/20 focus-within:border-blue-400 transition-all">
+          <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={mode === 'generate' ? 'Enter a topic to generate keywords...' : 'Ask a question...'}
-            className={`flex-1 px-4 py-2 border rounded-xl focus:ring-2 focus:border-transparent ${
-              mode === 'generate' 
-                ? 'focus:ring-purple-500' 
-                : 'focus:ring-blue-500'
-            }`}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSubmit(e);
+              }
+            }}
+            placeholder={mode === 'generate' ? 'Enter a topic to generate concepts...' : 'Ask a question...'}
+            className="flex-1 max-h-32 min-h-[44px] px-3 py-2.5 bg-transparent border-none focus:ring-0 text-sm text-slate-700 placeholder-slate-400 resize-none custom-scrollbar"
             disabled={isLoading || isCreating}
+            rows={1}
           />
           <button
             type="submit"
             disabled={!input.trim() || isLoading || isCreating}
-            className={`px-4 py-2 text-white rounded-xl disabled:opacity-50 disabled:cursor-not-allowed ${
+            className={`p-2.5 rounded-xl text-white shrink-0 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed ${
               mode === 'generate'
-                ? 'bg-purple-500 hover:bg-purple-600'
-                : 'bg-blue-500 hover:bg-blue-600'
+                ? 'bg-purple-600 hover:bg-purple-700 shadow-sm shadow-purple-600/20'
+                : 'bg-blue-600 hover:bg-blue-700 shadow-sm shadow-blue-600/20'
             }`}
           >
-            {mode === 'generate' ? <Wand2 className="w-4 h-4" /> : <Send className="w-4 h-4" />}
+            {mode === 'generate' ? <Wand2 className="w-5 h-5" /> : <Send className="w-5 h-5" />}
           </button>
+        </div>
+        <div className="mt-2 text-center">
+          <span className="text-[10px] font-medium text-slate-400">Press Enter to send, Shift+Enter for new line</span>
         </div>
       </form>
     </div>

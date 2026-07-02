@@ -1,22 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { createServiceClient } from '@/lib/supabase/server';
+import { requireOrgContext, audit } from '@/lib/auth';
+import { apiError } from '@/lib/api';
 import { createEmbedding } from '@/lib/openai';
 import pdf from 'pdf-parse';
 
 // POST /api/assets/upload - Upload files and link to keyword
 export async function POST(req: NextRequest) {
   try {
-    const supabase = createServerClient();
+    const ctx = await requireOrgContext('upload_assets');
     const formData = await req.formData();
-    
+
     const file = formData.get('file') as File;
     const keywordId = formData.get('keyword_id') as string;
-    
+
     if (!file) {
       return NextResponse.json(
         { data: null, error: 'No file provided' },
         { status: 400 }
       );
+    }
+
+    // Keyword link must belong to the active organization
+    if (keywordId) {
+      const { data: keyword } = await ctx.supabase
+        .from('keywords')
+        .select('id')
+        .eq('id', keywordId)
+        .eq('organization_id', ctx.org.id)
+        .maybeSingle();
+      if (!keyword) {
+        return NextResponse.json({ data: null, error: 'Keyword not found' }, { status: 400 });
+      }
     }
 
     // Determine file type
@@ -28,11 +43,12 @@ export async function POST(req: NextRequest) {
     else if (mimeType.includes('word') || mimeType.includes('document')) fileType = 'word';
     else if (mimeType.startsWith('text/')) fileType = 'text';
 
-    // Upload to Supabase Storage
+    // Upload to Supabase Storage under an org-scoped path
     const fileBuffer = await file.arrayBuffer();
-    const fileName = `${Date.now()}-${file.name}`;
-    
-    const { data: uploadData, error: uploadError } = await supabase.storage
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, '_');
+    const fileName = `${ctx.org.id}/${Date.now()}-${safeName}`;
+
+    const { error: uploadError } = await ctx.supabase.storage
       .from('assets')
       .upload(fileName, fileBuffer, {
         contentType: mimeType,
@@ -40,21 +56,23 @@ export async function POST(req: NextRequest) {
 
     if (uploadError) throw uploadError;
 
-    // Get public URL
-    const { data: urlData } = supabase.storage
+    const { data: urlData } = ctx.supabase.storage
       .from('assets')
       .getPublicUrl(fileName);
 
     // Create asset record
-    const { data: asset, error: assetError } = await supabase
+    const { data: asset, error: assetError } = await ctx.supabase
       .from('assets')
       .insert({
+        organization_id: ctx.org.id,
         file_name: file.name,
         file_url: urlData.publicUrl,
         file_type: fileType,
         mime_type: mimeType,
         file_size: file.size,
         processed: false,
+        processing_status: 'processing',
+        created_by: ctx.user.id,
       })
       .select()
       .single();
@@ -63,41 +81,45 @@ export async function POST(req: NextRequest) {
 
     // Link to keyword if provided
     if (keywordId && asset) {
-      await supabase.from('keyword_assets').insert({
+      await ctx.supabase.from('keyword_assets').insert({
         keyword_id: keywordId,
         asset_id: asset.id,
       });
     }
 
+    await audit(ctx, 'asset.upload', { type: 'asset', id: asset.id }, {
+      file_name: file.name,
+      file_type: fileType,
+      keyword_id: keywordId || null,
+    });
+
     // Queue for processing (text extraction, chunking)
     // In a real app, this would trigger a background job
-    processAssetAsync(asset.id, fileBuffer, mimeType, keywordId);
+    processAssetAsync(asset.id, ctx.org.id, fileBuffer, mimeType, keywordId);
 
     return NextResponse.json({ data: asset, error: null });
   } catch (error) {
-    console.error('Error uploading asset:', error);
-    return NextResponse.json(
-      { data: null, error: 'Failed to upload file' },
-      { status: 500 }
-    );
+    return apiError(error, 'Failed to upload file');
   }
 }
 
 // Background processing function (simplified - in production use a job queue)
 async function processAssetAsync(
   assetId: string,
+  organizationId: string,
   fileBuffer?: ArrayBuffer,
   mimeType?: string,
   keywordId?: string
 ) {
   try {
-    const supabase = createServerClient();
+    const supabase = createServiceClient();
 
     // Get asset
     const { data: asset } = await supabase
       .from('assets')
       .select('*')
       .eq('id', assetId)
+      .eq('organization_id', organizationId)
       .single();
 
     if (!asset) return;
@@ -143,20 +165,22 @@ async function processAssetAsync(
       .update({
         extracted_text: extractedText,
         processed: true,
+        processing_status: 'processed',
       })
       .eq('id', assetId);
 
     // Create chunks and embeddings
     if (extractedText) {
       const chunks = chunkText(extractedText);
-      
+
       for (let i = 0; i < chunks.length; i++) {
         const chunkText = chunks[i];
-        
+
         try {
           const embedding = await createEmbedding(chunkText);
-          
+
           await supabase.from('chunks').insert({
+            organization_id: organizationId,
             asset_id: assetId,
             keyword_id: keywordId || null,
             chunk_index: i,
@@ -178,9 +202,9 @@ async function processAssetAsync(
 function chunkText(text: string, maxChunkSize: number = 1000): string[] {
   const chunks: string[] = [];
   const paragraphs = text.split(/\n\n+/);
-  
+
   let currentChunk = '';
-  
+
   for (const para of paragraphs) {
     if (currentChunk.length + para.length > maxChunkSize) {
       if (currentChunk) {
@@ -191,26 +215,27 @@ function chunkText(text: string, maxChunkSize: number = 1000): string[] {
       currentChunk += '\n\n' + para;
     }
   }
-  
+
   if (currentChunk.trim()) {
     chunks.push(currentChunk.trim());
   }
-  
+
   return chunks;
 }
 
 // GET /api/assets/upload - Get assets (optionally filtered by keyword)
 export async function GET(req: NextRequest) {
   try {
-    const supabase = createServerClient();
+    const ctx = await requireOrgContext('view_keywords');
     const { searchParams } = new URL(req.url);
     const keywordId = searchParams.get('keyword_id');
 
     if (keywordId) {
-      const { data, error } = await supabase
+      const { data, error } = await ctx.supabase
         .from('keyword_assets')
-        .select('*, asset:assets(*)')
-        .eq('keyword_id', keywordId);
+        .select('*, asset:assets!inner(*)')
+        .eq('keyword_id', keywordId)
+        .eq('asset.organization_id', ctx.org.id);
 
       if (error) throw error;
 
@@ -220,19 +245,16 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    const { data: assets, error } = await supabase
+    const { data: assets, error } = await ctx.supabase
       .from('assets')
       .select('*')
+      .eq('organization_id', ctx.org.id)
       .order('created_at', { ascending: false });
 
     if (error) throw error;
 
     return NextResponse.json({ data: assets, error: null });
   } catch (error) {
-    console.error('Error fetching assets:', error);
-    return NextResponse.json(
-      { data: null, error: 'Failed to fetch assets' },
-      { status: 500 }
-    );
+    return apiError(error, 'Failed to fetch assets');
   }
 }

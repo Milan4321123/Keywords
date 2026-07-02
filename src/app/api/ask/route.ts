@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { requireOrgContext, audit, authErrorResponse } from '@/lib/auth';
 import { createEmbedding, chatCompletion, rerankChunks } from '@/lib/openai';
 import { buildAIContext, getSystemPrompt, extractPotentialKeywords, rankChunks } from '@/lib/ai-context';
 import { Keyword, KeywordRelation, Chunk, AskAIResponse } from '@/types';
@@ -9,15 +9,19 @@ type ChunkWithSimilarity = Chunk & { similarity: number };
 // POST /api/ask - Ask AI a question using the knowledge base
 export async function POST(req: NextRequest) {
   try {
-    const supabase = createServerClient();
+    const ctx = await requireOrgContext('run_ai');
+    const supabase = ctx.supabase;
     const body = await req.json();
-    
+
     const {
       question,
       context_keyword_ids = [],
       include_relations = true,
       include_assets = true,
     } = body;
+
+    // Retrieval scope always comes from the verified session, never the payload.
+    const org_id = ctx.org.id;
 
     if (!question) {
       return NextResponse.json(
@@ -29,7 +33,8 @@ export async function POST(req: NextRequest) {
     // 1. Get all keywords for potential matching
     const { data: allKeywords } = await supabase
       .from('keywords')
-      .select('*');
+      .select('*')
+      .eq('organization_id', ctx.org.id);
 
     // 2. Extract keywords mentioned in the question
     const mentionedKeywords = extractPotentialKeywords(question, allKeywords || []);
@@ -48,6 +53,7 @@ export async function POST(req: NextRequest) {
       const { data: keywords } = await supabase
         .from('keywords')
         .select('*')
+        .eq('organization_id', ctx.org.id)
         .in('id', relevantKeywordIds);
       relevantKeywords = keywords || [];
     } else {
@@ -55,6 +61,7 @@ export async function POST(req: NextRequest) {
       const { data: rootKeywords } = await supabase
         .from('keywords')
         .select('*')
+        .eq('organization_id', ctx.org.id)
         .is('parent_id', null)
         .limit(10);
       relevantKeywords = rootKeywords || [];
@@ -70,6 +77,7 @@ export async function POST(req: NextRequest) {
           from_keyword:keywords!from_keyword_id(id, title),
           to_keyword:keywords!to_keyword_id(id, title)
         `)
+        .eq('organization_id', ctx.org.id)
         .or(
           relevantKeywordIds
             .map((id) => `from_keyword_id.eq.${id},to_keyword_id.eq.${id}`)
@@ -85,8 +93,15 @@ export async function POST(req: NextRequest) {
         // Create embedding for the question
         const questionEmbedding = await createEmbedding(question);
 
+        const orgId: string = org_id;
+
+        const isLikelyMissingArg = (error: unknown, argName: string) => {
+          const msg = String((error as any)?.message ?? error ?? '');
+          return msg.includes(argName) && (msg.includes('parameter') || msg.includes('argument') || msg.includes('named'));
+        };
+
         const tryHybrid = async (filterKeywordIds: string[] | null): Promise<ChunkWithSimilarity[]> => {
-          const { data, error } = await supabase.rpc('match_chunks_hybrid', {
+          const argsBase = {
             query_text: question,
             query_embedding: questionEmbedding,
             match_threshold: 0.65,
@@ -94,19 +109,43 @@ export async function POST(req: NextRequest) {
             filter_keyword_ids: filterKeywordIds,
             weight_vector: 0.7,
             weight_text: 0.3,
-          });
-          if (error) throw error;
+          };
+
+          const withScope = orgId ? { ...argsBase, filter_org_id: orgId } : argsBase;
+
+          const { data, error } = await supabase.rpc('match_chunks_hybrid', withScope);
+          if (error) {
+            // Backward compat: DB function not yet migrated to accept filter_org_id
+            if (orgId && isLikelyMissingArg(error, 'filter_org_id')) {
+              const retry = await supabase.rpc('match_chunks_hybrid', argsBase);
+              if (retry.error) throw retry.error;
+              return (retry.data ?? []) as ChunkWithSimilarity[];
+            }
+            throw error;
+          }
           return (data ?? []) as ChunkWithSimilarity[];
         };
 
         const tryVectorOnly = async (filterKeywordIds: string[] | null): Promise<ChunkWithSimilarity[]> => {
-          const { data, error } = await supabase.rpc('match_chunks', {
+          const argsBase = {
             query_embedding: questionEmbedding,
             match_threshold: 0.7,
             match_count: 25,
             filter_keyword_ids: filterKeywordIds,
-          });
-          if (error) throw error;
+          };
+
+          const withScope = orgId ? { ...argsBase, filter_org_id: orgId } : argsBase;
+
+          const { data, error } = await supabase.rpc('match_chunks', withScope);
+          if (error) {
+            // Backward compat: DB function not yet migrated to accept filter_org_id
+            if (orgId && isLikelyMissingArg(error, 'filter_org_id')) {
+              const retry = await supabase.rpc('match_chunks', argsBase);
+              if (retry.error) throw retry.error;
+              return (retry.data ?? []) as ChunkWithSimilarity[];
+            }
+            throw error;
+          }
           return (data ?? []) as ChunkWithSimilarity[];
         };
 
@@ -194,7 +233,11 @@ export async function POST(req: NextRequest) {
     const assetIds = Array.from(assetIdSet);
     const assetNameById = new Map<string, string>();
     if (assetIds.length > 0) {
-      const { data: assets } = await supabase.from('assets').select('id,file_name').in('id', assetIds);
+      const { data: assets } = await supabase
+        .from('assets')
+        .select('id,file_name')
+        .eq('organization_id', ctx.org.id)
+        .in('id', assetIds);
       for (const a of assets ?? []) {
         if (a?.id && a?.file_name) assetNameById.set(a.id, a.file_name);
       }
@@ -224,6 +267,12 @@ export async function POST(req: NextRequest) {
       })),
     ];
 
+    await audit(ctx, 'ai.ask', { type: 'ai_question' }, {
+      question: question.slice(0, 500),
+      keywords_used: relevantKeywords.length,
+      chunks_used: relevantChunks.length,
+    });
+
     // 10. Return response
     const response: AskAIResponse = {
       answer,
@@ -233,6 +282,10 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(response);
   } catch (error) {
+    const authErr = authErrorResponse(error);
+    if (authErr) {
+      return NextResponse.json({ error: authErr.message }, { status: authErr.status });
+    }
     console.error('Error in AI ask:', error);
     return NextResponse.json(
       { error: 'Failed to process question' },

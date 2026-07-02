@@ -1,7 +1,90 @@
 // Type definitions for the Company Knowledge Base
 
+// =====================================================
+// Tenancy, identity, RBAC (Milestone 1)
+// =====================================================
+
+export type OrgRole = 'owner' | 'admin' | 'manager' | 'analyst' | 'editor' | 'viewer' | 'guest';
+
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  industry: string | null;
+  timezone: string;
+  default_language: string;
+  settings: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Profile {
+  id: string;
+  email: string;
+  full_name: string | null;
+  avatar_url: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OrganizationMember {
+  id: string;
+  organization_id: string;
+  user_id: string;
+  role: OrgRole;
+  created_at: string;
+  updated_at: string;
+  profiles?: Profile;
+  organizations?: Organization;
+}
+
+export interface OrganizationInvite {
+  id: string;
+  organization_id: string;
+  email: string;
+  role: OrgRole;
+  invited_by: string | null;
+  accepted_at: string | null;
+  expires_at: string;
+  created_at: string;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  organization_id: string;
+  actor_id: string | null;
+  action: string;
+  entity_type: string | null;
+  entity_id: string | null;
+  details: Record<string, any>;
+  created_at: string;
+  profiles?: Pick<Profile, 'email' | 'full_name'> | null;
+}
+
+export type KeywordType =
+  | 'concept' | 'process' | 'metric' | 'dataset' | 'document_type' | 'role'
+  | 'task_type' | 'workflow_step' | 'department' | 'entity' | 'kpi'
+  | 'report_type' | 'risk' | 'rule' | 'skill';
+
+export type KeywordStatus = 'draft' | 'active' | 'archived';
+
+export interface KeywordVersion {
+  id: string;
+  keyword_id: string;
+  organization_id: string;
+  version_no: number;
+  snapshot: Record<string, any>;
+  change_type: 'UPDATE' | 'DELETE';
+  changed_by: string | null;
+  created_at: string;
+}
+
 export interface Keyword {
   id: string;
+  organization_id?: string;
+  keyword_type?: KeywordType;
+  status?: KeywordStatus;
+  completeness_score?: number;
   parent_id: string | null;
   title: string;
   slug: string;
@@ -310,4 +393,45 @@ export interface AnalyticsAskResponse {
     input: Record<string, any>;
     output: Record<string, any>;
   }>;
+}
+
+export interface AnalyticsRecommendationRequest {
+  dataset_table_id: string;
+  question?: string;
+  context_keyword_ids?: string[];
+  top_n?: number;
+  max_rows?: number;
+}
+
+export interface AnalyticsRecommendation {
+  relation_id: string;
+  relation_type: RelationType;
+  from_keyword: { id: string; title: string };
+  to_keyword: { id: string; title: string };
+  impact_score: number;
+  confidence: number;
+  recommendation: string;
+  rationale: string;
+  evidence_row_ids: string[];
+  stats: {
+    from_mentions: number;
+    to_mentions: number;
+    overlap_mentions: number;
+  };
+}
+
+export interface AnalyticsRecommendationResponse {
+  table: {
+    id: string;
+    name: string;
+    row_count: number;
+  };
+  recommendations: AnalyticsRecommendation[];
+  executive_summary?: string | null;
+  graph_summary: {
+    considered_keywords: number;
+    considered_relations: number;
+    analyzed_rows: number;
+    note: string;
+  };
 }

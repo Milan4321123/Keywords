@@ -1,9 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { transcribeAudio } from '@/lib/openai';
+import { requireOrgContext, authErrorResponse } from '@/lib/auth';
 
 // POST /api/transcribe - Transcribe audio to text
 export async function POST(req: NextRequest) {
   try {
+    await requireOrgContext('upload_assets');
+
     // Check if OpenAI API key is configured
     if (!process.env.OPENAI_API_KEY) {
       console.error('OPENAI_API_KEY is not set');
@@ -39,6 +42,10 @@ export async function POST(req: NextRequest) {
       duration: null, // Could be extracted from audio metadata
     });
   } catch (error) {
+    const authErr = authErrorResponse(error);
+    if (authErr) {
+      return NextResponse.json({ error: authErr.message }, { status: authErr.status });
+    }
     console.error('Transcription error:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Failed to transcribe audio' },

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { mapSupabaseApiError } from '@/lib/supabase-errors';
+import { requireOrgContext, audit, authErrorResponse } from '@/lib/auth';
 import { chatCompletion } from '@/lib/openai';
 import { KeywordSuggestion, GenerateKeywordsResponse, Keyword } from '@/types';
 
@@ -43,6 +44,7 @@ Return ONLY valid JSON in this exact format:
 // POST /api/generate-keywords - Generate keyword suggestions using AI
 export async function POST(req: NextRequest) {
   try {
+    const ctx = await requireOrgContext('run_ai');
     const body = await req.json();
     const { topic, context, depth = 2, count = 5 } = body;
 
@@ -54,10 +56,10 @@ export async function POST(req: NextRequest) {
     }
 
     // Get existing keywords for context
-    const supabase = createServerClient();
-    const { data: existingKeywords } = await supabase
+    const { data: existingKeywords } = await ctx.supabase
       .from('keywords')
       .select('title, definition')
+      .eq('organization_id', ctx.org.id)
       .limit(20);
 
     const existingContext = existingKeywords?.length 
@@ -104,10 +106,15 @@ Requirements:
 
     return NextResponse.json(parsed);
   } catch (error) {
+    const authErr = authErrorResponse(error);
+    if (authErr) {
+      return NextResponse.json({ error: authErr.message }, { status: authErr.status });
+    }
     console.error('Error generating keywords:', error);
+    const mapped = mapSupabaseApiError(error, 'Failed to generate keyword suggestions');
     return NextResponse.json(
-      { error: 'Failed to generate keyword suggestions' },
-      { status: 500 }
+      { error: mapped.message },
+      { status: mapped.status }
     );
   }
 }
@@ -115,7 +122,8 @@ Requirements:
 // POST /api/generate-keywords/create - Create the suggested keywords
 export async function PUT(req: NextRequest) {
   try {
-    const supabase = createServerClient();
+    const ctx = await requireOrgContext('edit_keywords');
+    const supabase = ctx.supabase;
     const body = await req.json();
     const { keywords, parent_id = null } = body as { keywords: KeywordSuggestion[], parent_id?: string | null };
 
@@ -124,6 +132,18 @@ export async function PUT(req: NextRequest) {
         { error: 'Keywords array is required' },
         { status: 400 }
       );
+    }
+
+    if (parent_id) {
+      const { data: parent } = await supabase
+        .from('keywords')
+        .select('id')
+        .eq('id', parent_id)
+        .eq('organization_id', ctx.org.id)
+        .maybeSingle();
+      if (!parent) {
+        return NextResponse.json({ error: 'Parent keyword not found' }, { status: 400 });
+      }
     }
 
     const createdKeywords: Keyword[] = [];
@@ -142,6 +162,7 @@ export async function PUT(req: NextRequest) {
       const { data: created, error } = await supabase
         .from('keywords')
         .insert({
+          organization_id: ctx.org.id,
           title: kw.title,
           slug: slug,
           definition: kw.definition,
@@ -151,6 +172,7 @@ export async function PUT(req: NextRequest) {
           labels_json: {},
           rules: [],
           sort_order: 0,
+          created_by: ctx.user.id,
         })
         .select()
         .single();
@@ -177,16 +199,26 @@ export async function PUT(req: NextRequest) {
       await createKeywordWithChildren(kw, parent_id);
     }
 
-    return NextResponse.json({ 
-      data: createdKeywords, 
+    await audit(ctx, 'keyword.bulk_create', { type: 'keyword' }, {
+      count: createdKeywords.length,
+      source: 'ai_generation',
+    });
+
+    return NextResponse.json({
+      data: createdKeywords,
       error: null,
       message: `Successfully created ${createdKeywords.length} keywords`
     });
   } catch (error) {
+    const authErr = authErrorResponse(error);
+    if (authErr) {
+      return NextResponse.json({ error: authErr.message }, { status: authErr.status });
+    }
     console.error('Error creating keywords:', error);
+    const mapped = mapSupabaseApiError(error, 'Failed to create keywords');
     return NextResponse.json(
-      { error: 'Failed to create keywords' },
-      { status: 500 }
+      { error: mapped.message },
+      { status: mapped.status }
     );
   }
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { SupabaseClient } from '@supabase/supabase-js';
+import { requireOrgContext, audit, authErrorResponse } from '@/lib/auth';
 import { parseWorkbookToDatasetTables } from '@/lib/datasets';
 
 export const runtime = 'nodejs';
@@ -9,10 +10,10 @@ function guessTitleFromFileName(fileName: string): string {
   return base.trim() || 'Dataset';
 }
 
-async function insertInChunks<T extends Record<string, any>>(
-  supabase: ReturnType<typeof createServerClient>,
+async function insertInChunks(
+  supabase: SupabaseClient,
   table: string,
-  rows: T[],
+  rows: Record<string, any>[],
   chunkSize: number
 ) {
   for (let i = 0; i < rows.length; i += chunkSize) {
@@ -25,7 +26,8 @@ async function insertInChunks<T extends Record<string, any>>(
 // POST /api/datasets/upload - Upload Excel/CSV as structured tables for analytics
 export async function POST(req: NextRequest) {
   try {
-    const supabase = createServerClient();
+    const ctx = await requireOrgContext('upload_assets');
+    const supabase = ctx.supabase;
     const formData = await req.formData();
 
     const file = formData.get('file') as File | null;
@@ -38,7 +40,8 @@ export async function POST(req: NextRequest) {
 
     const mimeType = file.type;
     const fileBuffer = await file.arrayBuffer();
-    const fileNameOnStorage = `${Date.now()}-${file.name}`;
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, '_');
+    const fileNameOnStorage = `${ctx.org.id}/${Date.now()}-${safeName}`;
 
     const { error: uploadError } = await supabase.storage
       .from('assets')
@@ -50,6 +53,7 @@ export async function POST(req: NextRequest) {
     const { data: asset, error: assetError } = await supabase
       .from('assets')
       .insert({
+        organization_id: ctx.org.id,
         file_name: file.name,
         file_url: urlData.publicUrl,
         file_type: 'excel',
@@ -58,6 +62,7 @@ export async function POST(req: NextRequest) {
         processed: true,
         extracted_text: null,
         meta_json: { structured: true },
+        created_by: ctx.user.id,
       })
       .select()
       .single();
@@ -78,9 +83,11 @@ export async function POST(req: NextRequest) {
     const { data: dataset, error: datasetError } = await supabase
       .from('datasets')
       .insert({
+        organization_id: ctx.org.id,
         asset_id: asset.id,
         title: providedTitle ?? guessTitleFromFileName(file.name),
         description,
+        created_by: ctx.user.id,
       })
       .select()
       .single();
@@ -118,8 +125,18 @@ export async function POST(req: NextRequest) {
       await insertInChunks(supabase, 'dataset_rows', rowRows, 500);
     }
 
+    await audit(ctx, 'dataset.import', { type: 'dataset', id: dataset.id }, {
+      file_name: file.name,
+      tables: tables.length,
+      rows: tables.reduce((sum, t) => sum + t.rows.length, 0),
+    });
+
     return NextResponse.json({ data: { dataset, asset }, error: null });
   } catch (err) {
+    const authErr = authErrorResponse(err);
+    if (authErr) {
+      return NextResponse.json({ data: null, error: authErr.message }, { status: authErr.status });
+    }
     console.error('Error uploading dataset:', err);
     const anyErr = err as any;
     if (anyErr?.code === 'PGRST205') {

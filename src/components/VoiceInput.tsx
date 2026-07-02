@@ -135,33 +135,33 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
         onClick={isRecording ? stopRecording : startRecording}
         disabled={disabled || isProcessing}
         className={`
-          relative flex items-center justify-center w-12 h-12 rounded-full
-          transition-all duration-200
+          relative flex items-center justify-center w-10 h-10 rounded-xl shadow-sm
+          transition-all duration-200 group
           ${isRecording 
-            ? 'bg-red-500 hover:bg-red-600' 
-            : 'bg-blue-500 hover:bg-blue-600'
+            ? 'bg-red-500 hover:bg-red-600 text-white shadow-red-500/20' 
+            : 'bg-white border border-slate-200 text-slate-500 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50'
           }
-          ${disabled || isProcessing ? 'opacity-50 cursor-not-allowed' : ''}
+          ${disabled || isProcessing ? 'opacity-50 cursor-not-allowed' : 'active:scale-95'}
         `}
         title={isRecording ? 'Stop recording' : `Record ${fieldLabels[targetField]}`}
       >
         {/* Pulse animation when recording */}
         {isRecording && (
-          <span className="absolute inset-0 rounded-full bg-red-400 recording-pulse" />
+          <span className="absolute inset-0 rounded-xl bg-red-400 animate-ping opacity-20" />
         )}
         
         {isProcessing ? (
-          <Loader2 className="w-5 h-5 text-white animate-spin" />
+          <Loader2 className="w-4 h-4 animate-spin" />
         ) : isRecording ? (
-          <Square className="w-5 h-5 text-white fill-white" />
+          <Square className="w-4 h-4 fill-current" />
         ) : (
-          <Mic className="w-5 h-5 text-white" />
+          <Mic className="w-4 h-4" />
         )}
       </button>
 
       {/* Status text */}
       <div className="flex flex-col">
-        <span className="text-sm font-medium text-gray-700">
+        <span className="text-sm font-bold text-slate-700">
           {isProcessing 
             ? 'Processing...' 
             : isRecording 
@@ -170,10 +170,10 @@ export const VoiceInput: React.FC<VoiceInputProps> = ({
           }
         </span>
         {isRecording && (
-          <span className="text-xs text-gray-500">{formatDuration(duration)}</span>
+          <span className="text-xs font-medium text-red-500 animate-pulse">{formatDuration(duration)}</span>
         )}
         {error && (
-          <span className="text-xs text-red-500">{error}</span>
+          <span className="text-xs font-medium text-red-500">{error}</span>
         )}
       </div>
     </div>

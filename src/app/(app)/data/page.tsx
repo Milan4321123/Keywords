@@ -1,10 +1,27 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
-import { Dataset, DatasetRow, DatasetTable, AnalyticsAskResponse } from '@/types';
+import { Dataset, DatasetRow, DatasetTable, AnalyticsAskResponse, AnalyticsRecommendationResponse, Keyword } from '@/types';
 
 type TableOption = { dataset: Dataset; table: DatasetTable };
+
+function triggerDownload(fileName: string, content: string, mimeType: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function csvEscape(value: unknown): string {
+  const raw = value == null ? '' : String(value);
+  const escaped = raw.replace(/"/g, '""');
+  return `"${escaped}"`;
+}
 
 export default function AnalyticsPage() {
   const [datasets, setDatasets] = useState<Dataset[]>([]);
@@ -16,6 +33,10 @@ export default function AnalyticsPage() {
   const [answer, setAnswer] = useState<string>('');
   const [toolResults, setToolResults] = useState<AnalyticsAskResponse['tool_results']>([]);
   const [asking, setAsking] = useState(false);
+  const [keywords, setKeywords] = useState<Keyword[]>([]);
+  const [selectedKeywordIds, setSelectedKeywordIds] = useState<string[]>([]);
+  const [recommending, setRecommending] = useState(false);
+  const [recommendationResult, setRecommendationResult] = useState<AnalyticsRecommendationResponse | null>(null);
   const [error, setError] = useState<string>('');
   const [evidenceRowsByKey, setEvidenceRowsByKey] = useState<Record<string, DatasetRow[]>>({});
 
@@ -47,8 +68,20 @@ export default function AnalyticsPage() {
     }
   };
 
+  const loadKeywords = async () => {
+    try {
+      const res = await fetch('/api/keywords');
+      const json = await res.json();
+      if (!res.ok || json.error) throw new Error(json.error || 'Failed to load keywords');
+      setKeywords(json.data ?? []);
+    } catch {
+      setKeywords([]);
+    }
+  };
+
   useEffect(() => {
     loadDatasets();
+    loadKeywords();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -109,6 +142,32 @@ export default function AnalyticsPage() {
     }
   };
 
+  const handleRecommend = async () => {
+    if (!selectedTableId || recommending) return;
+    setError('');
+    setRecommending(true);
+    setRecommendationResult(null);
+    try {
+      const res = await fetch('/api/analytics/recommend', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          dataset_table_id: selectedTableId,
+          question: question.trim() || undefined,
+          context_keyword_ids: selectedKeywordIds,
+          top_n: 6,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || json.error) throw new Error(json.error || 'Failed to generate recommendations');
+      setRecommendationResult(json);
+    } catch (e: any) {
+      setError(e?.message ?? 'Failed to generate recommendations');
+    } finally {
+      setRecommending(false);
+    }
+  };
+
   const fetchEvidenceRows = async (key: string, rowIds: string[]) => {
     if (evidenceRowsByKey[key]) return;
     try {
@@ -125,17 +184,108 @@ export default function AnalyticsPage() {
     }
   };
 
+  const downloadRecommendationsJson = () => {
+    if (!recommendationResult || !selected) return;
+    const payload = {
+      exported_at: new Date().toISOString(),
+      dataset: {
+        id: selected.table.id,
+        name: selected.table.name,
+      },
+      graph_summary: recommendationResult.graph_summary,
+      executive_summary: recommendationResult.executive_summary ?? null,
+      recommendations: recommendationResult.recommendations,
+    };
+    const base = selected.table.name.replace(/\s+/g, '_').toLowerCase();
+    triggerDownload(
+      `dependency_recommendations_${base}.json`,
+      JSON.stringify(payload, null, 2),
+      'application/json;charset=utf-8;'
+    );
+  };
+
+  const downloadRecommendationsCsv = () => {
+    if (!recommendationResult || !selected) return;
+    const headers = [
+      'relation_type',
+      'from_keyword',
+      'to_keyword',
+      'impact_score',
+      'confidence',
+      'recommendation',
+      'rationale',
+      'from_mentions',
+      'to_mentions',
+      'overlap_mentions',
+      'evidence_row_ids',
+    ];
+
+    const rows = recommendationResult.recommendations.map((rec) => [
+      rec.relation_type,
+      rec.from_keyword.title,
+      rec.to_keyword.title,
+      rec.impact_score,
+      rec.confidence,
+      rec.recommendation,
+      rec.rationale,
+      rec.stats.from_mentions,
+      rec.stats.to_mentions,
+      rec.stats.overlap_mentions,
+      rec.evidence_row_ids.join('|'),
+    ]);
+
+    const lines = [headers.map(csvEscape).join(','), ...rows.map((r) => r.map(csvEscape).join(','))];
+    const csv = lines.join('\n');
+    const base = selected.table.name.replace(/\s+/g, '_').toLowerCase();
+    triggerDownload(`dependency_recommendations_${base}.csv`, csv, 'text/csv;charset=utf-8;');
+  };
+
+  const downloadExecutiveBrief = () => {
+    if (!recommendationResult || !selected) return;
+
+    const top = recommendationResult.recommendations.slice(0, 5);
+    const lines: string[] = [];
+    lines.push('EXECUTIVE BRIEF: Dependency Recommendations');
+    lines.push('');
+    lines.push(`Generated: ${new Date().toISOString()}`);
+    lines.push(`Dataset: ${selected.table.name} (${selected.table.id})`);
+    lines.push(`Rows analyzed: ${recommendationResult.graph_summary.analyzed_rows}`);
+    lines.push(`Keywords considered: ${recommendationResult.graph_summary.considered_keywords}`);
+    lines.push(`Relations considered: ${recommendationResult.graph_summary.considered_relations}`);
+    lines.push('');
+
+    if (recommendationResult.executive_summary) {
+      lines.push('Summary');
+      lines.push(recommendationResult.executive_summary);
+      lines.push('');
+    }
+
+    lines.push('Top Actions');
+    if (top.length === 0) {
+      lines.push('- No strong dependency signals found for this scope.');
+    } else {
+      top.forEach((rec, idx) => {
+        lines.push(
+          `${idx + 1}. [${rec.relation_type}] ${rec.from_keyword.title} -> ${rec.to_keyword.title} | impact ${rec.impact_score} | confidence ${rec.confidence}`
+        );
+        lines.push(`   Action: ${rec.recommendation}`);
+        lines.push(`   Why: ${rec.rationale}`);
+        lines.push(
+          `   Evidence: from=${rec.stats.from_mentions}, to=${rec.stats.to_mentions}, overlap=${rec.stats.overlap_mentions}, row_ids=${rec.evidence_row_ids.slice(0, 10).join(', ')}`
+        );
+      });
+    }
+
+    const base = selected.table.name.replace(/\s+/g, '_').toLowerCase();
+    triggerDownload(`dependency_brief_${base}.txt`, lines.join('\n'), 'text/plain;charset=utf-8;');
+  };
+
   return (
     <div className="min-h-screen bg-gray-50">
       <header className="bg-white border-b">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-lg font-semibold text-gray-900">Analytics</h1>
-            <p className="text-sm text-gray-500">Grounded answers computed from your uploaded tables</p>
-          </div>
-          <Link href="/" className="text-sm text-blue-600 hover:text-blue-700">
-            ← Back to Knowledge Base
-          </Link>
+        <div className="max-w-6xl mx-auto px-6 py-4">
+          <h1 className="text-lg font-semibold text-gray-900">Data Hub</h1>
+          <p className="text-sm text-gray-500">Grounded answers computed from your uploaded tables</p>
         </div>
       </header>
 
@@ -221,6 +371,43 @@ export default function AnalyticsPage() {
               </>
             )}
           </div>
+
+          <div className="bg-white border rounded-xl p-4">
+            <h2 className="font-medium text-gray-800 mb-2">Dependency Scope</h2>
+            <p className="text-sm text-gray-500 mb-3">Select business keywords to focus recommendations. Leave empty to analyze all.</p>
+            <div className="max-h-56 overflow-auto border rounded-lg p-2 space-y-1">
+              {keywords.length === 0 ? (
+                <p className="text-xs text-gray-500">No keywords available.</p>
+              ) : (
+                keywords.map((k) => {
+                  const checked = selectedKeywordIds.includes(k.id);
+                  return (
+                    <label key={k.id} className="flex items-start gap-2 text-xs text-gray-700">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => {
+                          setSelectedKeywordIds((prev) =>
+                            prev.includes(k.id) ? prev.filter((id) => id !== k.id) : [...prev, k.id]
+                          );
+                        }}
+                        className="mt-0.5"
+                      />
+                      <span>{k.title}</span>
+                    </label>
+                  );
+                })
+              )}
+            </div>
+            {selectedKeywordIds.length > 0 && (
+              <button
+                onClick={() => setSelectedKeywordIds([])}
+                className="mt-2 text-xs text-gray-600 hover:text-gray-800"
+              >
+                Clear selection ({selectedKeywordIds.length})
+              </button>
+            )}
+          </div>
         </section>
 
         <section className="lg:col-span-2 space-y-4">
@@ -243,6 +430,13 @@ export default function AnalyticsPage() {
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm disabled:opacity-50"
               >
                 {asking ? 'Computing…' : 'Ask'}
+              </button>
+              <button
+                onClick={handleRecommend}
+                disabled={recommending || !selectedTableId}
+                className="px-4 py-2 bg-gray-900 text-white rounded-lg text-sm disabled:opacity-50"
+              >
+                {recommending ? 'Analyzing dependencies…' : 'Get Dependency Recommendations'}
               </button>
               {error && <p className="text-sm text-red-600">{error}</p>}
             </div>
@@ -294,6 +488,87 @@ export default function AnalyticsPage() {
                     ))}
                   </div>
                 </details>
+              )}
+            </div>
+          )}
+
+          {recommendationResult && (
+            <div className="bg-white border rounded-xl p-4">
+              <div className="flex items-start justify-between gap-3 mb-2">
+                <h2 className="font-medium text-gray-800">Dependency Recommendations</h2>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={downloadExecutiveBrief}
+                    className="text-xs px-2 py-1 rounded border hover:bg-gray-50"
+                  >
+                    Download Brief
+                  </button>
+                  <button
+                    onClick={downloadRecommendationsJson}
+                    className="text-xs px-2 py-1 rounded border hover:bg-gray-50"
+                  >
+                    Download JSON
+                  </button>
+                  <button
+                    onClick={downloadRecommendationsCsv}
+                    className="text-xs px-2 py-1 rounded border hover:bg-gray-50"
+                  >
+                    Download CSV
+                  </button>
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 mb-3">
+                Keywords: {recommendationResult.graph_summary.considered_keywords} • Relations: {recommendationResult.graph_summary.considered_relations} • Rows analyzed: {recommendationResult.graph_summary.analyzed_rows}
+              </p>
+              <p className="text-xs text-gray-600 mb-4">{recommendationResult.graph_summary.note}</p>
+
+              {recommendationResult.executive_summary && (
+                <div className="mb-4 rounded-lg border bg-gray-50 p-3">
+                  <div className="text-xs font-medium text-gray-700 mb-1">Executive summary</div>
+                  <div className="text-sm text-gray-800 whitespace-pre-wrap">{recommendationResult.executive_summary}</div>
+                </div>
+              )}
+
+              {recommendationResult.recommendations.length === 0 ? (
+                <p className="text-sm text-gray-500">No strong dependency signals found for this selection.</p>
+              ) : (
+                <div className="space-y-3">
+                  {recommendationResult.recommendations.map((rec) => {
+                    const evidenceKey = `dep_${rec.relation_id}`;
+                    return (
+                      <div key={rec.relation_id} className="border rounded-lg p-3">
+                        <div className="flex flex-wrap items-center gap-2 text-xs mb-2">
+                          <span className="font-medium text-gray-800">{rec.from_keyword.title}</span>
+                          <span className="text-gray-400">→</span>
+                          <span className="font-medium text-gray-800">{rec.to_keyword.title}</span>
+                          <span className="px-2 py-0.5 rounded bg-gray-100 text-gray-700">{rec.relation_type}</span>
+                          <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-700">impact {rec.impact_score}</span>
+                          <span className="px-2 py-0.5 rounded bg-green-50 text-green-700">confidence {rec.confidence}</span>
+                        </div>
+                        <p className="text-sm text-gray-800">{rec.recommendation}</p>
+                        <p className="text-xs text-gray-500 mt-1">{rec.rationale}</p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Mentions — from: {rec.stats.from_mentions}, to: {rec.stats.to_mentions}, overlap: {rec.stats.overlap_mentions}
+                        </p>
+                        {rec.evidence_row_ids.length > 0 && (
+                          <div className="mt-2">
+                            <button
+                              onClick={() => fetchEvidenceRows(evidenceKey, rec.evidence_row_ids.slice(0, 50))}
+                              className="text-xs px-2 py-1 rounded border hover:bg-gray-50"
+                            >
+                              Load evidence rows ({Math.min(50, rec.evidence_row_ids.length)})
+                            </button>
+                          </div>
+                        )}
+                        {evidenceRowsByKey[evidenceKey]?.length > 0 && (
+                          <pre className="mt-2 bg-gray-50 rounded p-2 overflow-auto text-xs">
+                            {JSON.stringify(evidenceRowsByKey[evidenceKey], null, 2)}
+                          </pre>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               )}
             </div>
           )}

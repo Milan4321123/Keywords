@@ -1,8 +1,18 @@
-# Company Knowledge Base - Organizational AI
+# Company Brain — Keyword-Based Organizational AI
 
-An AI-powered knowledge management system built around your company's keyword ontology. Define terms, create relationships, upload evidence, and get intelligent answers from your AI assistant.
+A multi-tenant company intelligence platform built around your company's keyword ontology. Define terms, create relationships, upload evidence and structured data, and get grounded answers from your AI assistant.
+
+The full product design (architecture, schema, AI routing, security model, milestones) lives in [`docs/`](docs/).
 
 ## Features
+
+### 🏢 Organizations, Auth & Roles (Milestone 1)
+- Email/password sign-in (Supabase Auth), multi-organization workspaces
+- Role-based access control: owner, admin, manager, analyst, editor, viewer, guest
+- Member invites by email (claimed automatically at first sign-in)
+- Every API route is organization-scoped and permission-checked
+- Append-only audit log of keywords, relations, uploads, datasets, AI questions, and member changes
+- Keyword version history captured automatically on every update
 
 ### 🌳 Keyword Tree (Ontology)
 - Hierarchical organization of company concepts
@@ -79,8 +89,10 @@ An AI-powered knowledge management system built around your company's keyword on
 2. **Set up Supabase**
    - Create a new Supabase project
    - Run the SQL schema from `supabase/schema.sql`
+   - Then run `supabase/migrations/0002_platform_foundation.sql` (multi-tenancy, roles, audit, versioning — safe on both fresh and existing databases; pre-existing data is moved into a "Default Organization" that the first user to create an organization claims automatically)
    - Enable the `pgvector` extension
    - Create a storage bucket named `assets`
+   - Enable email/password auth under Authentication → Providers
    - If you created your project before analytics existed, run `supabase/analytics.sql` too
 
 3. **Configure environment**
@@ -101,7 +113,7 @@ An AI-powered knowledge management system built around your company's keyword on
    ```
 
 5. **Open the app**
-   Navigate to [http://localhost:3000](http://localhost:3000)
+   Navigate to [http://localhost:3000](http://localhost:3000), sign up, and create your organization.
 
 ## Database Schema
 
@@ -201,16 +213,29 @@ Properties
 | `/api/datasets/upload` | POST | Upload Excel/CSV as tables |
 | `/api/analytics/query` | POST | Run aggregations with evidence |
 | `/api/analytics/ask` | POST | Tool-grounded analytics chat |
+| `/api/orgs` | GET/POST | List / create organizations |
+| `/api/orgs/active` | POST | Switch active organization |
+| `/api/orgs/members` | GET/POST/PATCH/DELETE | Members, invites, roles |
+| `/api/audit` | GET | Paged audit log (admins) |
+
+All routes require a signed-in member of the active organization; roles gate mutations (see `docs/06-security-model.md`).
 
 ## Roadmap
 
-- [ ] Drag-and-drop tree reorganization
-- [ ] Bulk import/export (CSV, JSON)
-- [ ] Visual knowledge graph view
-- [ ] User authentication & permissions
-- [ ] Audit log / version history
-- [ ] Workflow automation triggers
-- [ ] Mobile app
+- [x] User authentication & permissions (Milestone 1)
+- [x] Audit log / version history (Milestone 1)
+- [ ] Keyword typing, status & completeness UI (Milestone 2)
+- [ ] Visual knowledge graph view (Milestone 3)
+- [ ] Ingestion hardening: OCR, summaries, keyword suggestions (Milestone 4)
+- [ ] Data validation & quality reports (Milestone 5, 7)
+- [ ] AI router with intent detection & context builder (Milestone 6)
+- [ ] Metric catalog (Milestone 7)
+- [ ] Report generator with exports (Milestone 8)
+- [ ] Forecasting service (Milestone 9)
+- [ ] Tasks & workflows (Milestone 10)
+- [ ] Production hardening: rate limits, observability, tests (Milestone 11)
+
+See [`docs/07-milestones.md`](docs/07-milestones.md) for the full plan.
 
 ## License
 

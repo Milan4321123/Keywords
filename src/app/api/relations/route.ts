@@ -1,20 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { requireOrgContext, audit } from '@/lib/auth';
+import { apiError } from '@/lib/api';
 
 // GET /api/relations - Get all relations (optionally filtered)
 export async function GET(req: NextRequest) {
   try {
-    const supabase = createServerClient();
+    const ctx = await requireOrgContext('view_keywords');
     const { searchParams } = new URL(req.url);
     const keywordId = searchParams.get('keyword_id');
 
-    let query = supabase
+    let query = ctx.supabase
       .from('keyword_relations')
       .select(`
         *,
         from_keyword:keywords!from_keyword_id(id, title, slug),
         to_keyword:keywords!to_keyword_id(id, title, slug)
-      `);
+      `)
+      .eq('organization_id', ctx.org.id);
 
     if (keywordId) {
       query = query.or(`from_keyword_id.eq.${keywordId},to_keyword_id.eq.${keywordId}`);
@@ -26,23 +28,41 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ data: relations, error: null });
   } catch (error) {
-    console.error('Error fetching relations:', error);
-    return NextResponse.json(
-      { data: null, error: 'Failed to fetch relations' },
-      { status: 500 }
-    );
+    return apiError(error, 'Failed to fetch relations');
   }
 }
 
 // POST /api/relations - Create a new relation
 export async function POST(req: NextRequest) {
   try {
-    const supabase = createServerClient();
+    const ctx = await requireOrgContext('edit_keywords');
     const body = await req.json();
 
-    const { data: relation, error } = await supabase
+    if (!body.from_keyword_id || !body.to_keyword_id || !body.relation_type) {
+      return NextResponse.json(
+        { data: null, error: 'from_keyword_id, to_keyword_id and relation_type are required' },
+        { status: 400 }
+      );
+    }
+
+    // Both endpoints must belong to the active organization
+    const { data: endpoints, error: endpointError } = await ctx.supabase
+      .from('keywords')
+      .select('id')
+      .eq('organization_id', ctx.org.id)
+      .in('id', [body.from_keyword_id, body.to_keyword_id]);
+    if (endpointError) throw endpointError;
+    if ((endpoints ?? []).length !== 2) {
+      return NextResponse.json(
+        { data: null, error: 'Both keywords must exist in your organization' },
+        { status: 400 }
+      );
+    }
+
+    const { data: relation, error } = await ctx.supabase
       .from('keyword_relations')
       .insert({
+        organization_id: ctx.org.id,
         from_keyword_id: body.from_keyword_id,
         relation_type: body.relation_type,
         to_keyword_id: body.to_keyword_id,
@@ -61,7 +81,8 @@ export async function POST(req: NextRequest) {
 
     // If bidirectional, create the reverse relation too
     if (body.bidirectional) {
-      await supabase.from('keyword_relations').insert({
+      await ctx.supabase.from('keyword_relations').insert({
+        organization_id: ctx.org.id,
         from_keyword_id: body.to_keyword_id,
         relation_type: body.relation_type,
         to_keyword_id: body.from_keyword_id,
@@ -71,20 +92,20 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    await audit(ctx, 'relation.create', { type: 'relation', id: relation.id }, {
+      relation_type: body.relation_type,
+    });
+
     return NextResponse.json({ data: relation, error: null });
   } catch (error) {
-    console.error('Error creating relation:', error);
-    return NextResponse.json(
-      { data: null, error: 'Failed to create relation' },
-      { status: 500 }
-    );
+    return apiError(error, 'Failed to create relation');
   }
 }
 
 // DELETE /api/relations - Delete a relation by ID
 export async function DELETE(req: NextRequest) {
   try {
-    const supabase = createServerClient();
+    const ctx = await requireOrgContext('edit_keywords');
     const { searchParams } = new URL(req.url);
     const id = searchParams.get('id');
 
@@ -95,19 +116,18 @@ export async function DELETE(req: NextRequest) {
       );
     }
 
-    const { error } = await supabase
+    const { error } = await ctx.supabase
       .from('keyword_relations')
       .delete()
-      .eq('id', id);
+      .eq('id', id)
+      .eq('organization_id', ctx.org.id);
 
     if (error) throw error;
 
+    await audit(ctx, 'relation.delete', { type: 'relation', id });
+
     return NextResponse.json({ data: { deleted: true }, error: null });
   } catch (error) {
-    console.error('Error deleting relation:', error);
-    return NextResponse.json(
-      { data: null, error: 'Failed to delete relation' },
-      { status: 500 }
-    );
+    return apiError(error, 'Failed to delete relation');
   }
 }

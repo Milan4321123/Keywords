@@ -1,12 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerClient } from '@/lib/supabase';
+import { SupabaseClient } from '@supabase/supabase-js';
+import { requireOrgContext, authErrorResponse } from '@/lib/auth';
 import { runTableQuery, TableQuerySpec } from '@/lib/analytics';
 import { AnalyticsTableQueryRequest } from '@/types';
 
 export const runtime = 'nodejs';
 
 async function fetchRows(params: {
-  supabase: ReturnType<typeof createServerClient>;
+  supabase: SupabaseClient;
   datasetTableId: string;
   maxRows: number;
 }) {
@@ -37,7 +38,8 @@ async function fetchRows(params: {
 // POST /api/analytics/query - Compute aggregations over structured dataset rows (with evidence row IDs)
 export async function POST(req: NextRequest) {
   try {
-    const supabase = createServerClient();
+    const ctx = await requireOrgContext('view_datasets');
+    const supabase = ctx.supabase;
     const body = (await req.json()) as AnalyticsTableQueryRequest;
 
     if (!body?.dataset_table_id) {
@@ -54,12 +56,13 @@ export async function POST(req: NextRequest) {
       .select(
         `
         *,
-        dataset:datasets(*, asset:assets(*)),
+        dataset:datasets!inner(*, asset:assets(*)),
         columns:dataset_columns(*)
       `
       )
       .eq('id', body.dataset_table_id)
-      .single();
+      .eq('dataset.organization_id', ctx.org.id)
+      .maybeSingle();
     if (tableError) throw tableError;
     if (!table) {
       return NextResponse.json({ error: 'Table not found' }, { status: 404 });
@@ -91,6 +94,10 @@ export async function POST(req: NextRequest) {
       result,
     });
   } catch (err) {
+    const authErr = authErrorResponse(err);
+    if (authErr) {
+      return NextResponse.json({ error: authErr.message }, { status: authErr.status });
+    }
     console.error('Error running analytics query:', err);
     const anyErr = err as any;
     if (anyErr?.code === 'PGRST205') {

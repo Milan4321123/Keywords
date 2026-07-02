@@ -103,13 +103,14 @@ export const RelationEditor: React.FC<RelationEditorProps> = ({
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-700">
+        <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+          <Link2 className="w-4 h-4 text-slate-400" />
           Relations for "{keyword.title}"
         </h3>
         {!isAdding && (
           <button
             onClick={() => setIsAdding(true)}
-            className="flex items-center gap-1 px-3 py-1.5 text-sm text-blue-600 hover:bg-blue-50 rounded-lg"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-xl transition-colors"
           >
             <Plus className="w-4 h-4" />
             Add Relation
@@ -119,86 +120,92 @@ export const RelationEditor: React.FC<RelationEditorProps> = ({
 
       {/* Add New Relation Form */}
       {isAdding && (
-        <div className="p-4 bg-blue-50 rounded-xl space-y-4">
-          <div className="flex items-center gap-2">
-            <span className="font-medium text-gray-800">{keyword.title}</span>
-            <ArrowRight className="w-4 h-4 text-gray-400" />
+        <div className="p-5 bg-slate-50/50 border border-slate-200 rounded-2xl space-y-4 animate-in slide-in-from-top-2 duration-200">
+          <div className="flex items-center gap-3 mb-2">
+            <div className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm font-bold text-slate-700 shadow-sm">
+              {keyword.title}
+            </div>
+            <ArrowRight className="w-4 h-4 text-slate-400" />
           </div>
 
-          {/* Relation Type */}
-          <div>
-            <label className="block text-sm text-gray-600 mb-1">Relation Type</label>
-            <select
-              value={newRelation.relation_type}
-              onChange={(e) =>
-                setNewRelation({ ...newRelation, relation_type: e.target.value as RelationType })
-              }
-              className="w-full px-3 py-2 border rounded-lg bg-white"
-            >
-              {RELATION_TYPES.map((rt) => (
-                <option key={rt.value} value={rt.value}>
-                  {rt.icon} {rt.label}
-                </option>
-              ))}
-            </select>
-          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/* Relation Type */}
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Relation Type</label>
+              <select
+                value={newRelation.relation_type}
+                onChange={(e) =>
+                  setNewRelation({ ...newRelation, relation_type: e.target.value as RelationType })
+                }
+                className="w-full px-3 py-2.5 text-sm font-medium border border-slate-200 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-300 transition-all text-slate-700"
+              >
+                {RELATION_TYPES.map((rt) => (
+                  <option key={rt.value} value={rt.value}>
+                    {rt.icon} {rt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-          {/* Target Keyword */}
-          <div>
-            <label className="block text-sm text-gray-600 mb-1">Target Keyword</label>
-            <select
-              value={newRelation.to_keyword_id}
-              onChange={(e) =>
-                setNewRelation({ ...newRelation, to_keyword_id: e.target.value })
-              }
-              className="w-full px-3 py-2 border rounded-lg bg-white"
-            >
-              <option value="">Select a keyword...</option>
-              {availableKeywords.map((k) => (
-                <option key={k.id} value={k.id}>
-                  {k.title}
-                </option>
-              ))}
-            </select>
+            {/* Target Keyword */}
+            <div>
+              <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Target Keyword</label>
+              <select
+                value={newRelation.to_keyword_id}
+                onChange={(e) =>
+                  setNewRelation({ ...newRelation, to_keyword_id: e.target.value })
+                }
+                className="w-full px-3 py-2.5 text-sm font-medium border border-slate-200 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-300 transition-all text-slate-700"
+              >
+                <option value="">Select a keyword...</option>
+                {availableKeywords.map((k) => (
+                  <option key={k.id} value={k.id}>
+                    {k.title}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* Note */}
           <div>
-            <label className="block text-sm text-gray-600 mb-1">Note (optional)</label>
+            <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1.5">Note (optional)</label>
             <input
               type="text"
               value={newRelation.note}
               onChange={(e) => setNewRelation({ ...newRelation, note: e.target.value })}
-              className="w-full px-3 py-2 border rounded-lg"
+              className="w-full px-3 py-2.5 text-sm font-medium border border-slate-200 rounded-xl bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-300 transition-all text-slate-700 placeholder-slate-400"
               placeholder="Why are they related?"
             />
           </div>
 
           {/* Bidirectional */}
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={newRelation.bidirectional}
-              onChange={(e) =>
-                setNewRelation({ ...newRelation, bidirectional: e.target.checked })
-              }
-              className="w-4 h-4 rounded border-gray-300"
-            />
-            <span className="text-sm text-gray-600">Bidirectional (both ways)</span>
+          <label className="flex items-center gap-2.5 cursor-pointer group w-fit">
+            <div className="relative flex items-center justify-center">
+              <input
+                type="checkbox"
+                checked={newRelation.bidirectional}
+                onChange={(e) =>
+                  setNewRelation({ ...newRelation, bidirectional: e.target.checked })
+                }
+                className="peer w-5 h-5 rounded-md border-slate-300 text-blue-600 focus:ring-blue-500/20 transition-all cursor-pointer"
+              />
+            </div>
+            <span className="text-sm font-medium text-slate-600 group-hover:text-slate-800 transition-colors">Bidirectional (both ways)</span>
           </label>
 
           {/* Actions */}
-          <div className="flex justify-end gap-2 pt-2">
+          <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
             <button
               onClick={() => setIsAdding(false)}
-              className="px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg"
+              className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
             >
               Cancel
             </button>
             <button
               onClick={handleAdd}
               disabled={!newRelation.to_keyword_id}
-              className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50"
+              className="px-4 py-2 text-sm font-medium bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm shadow-blue-600/20 transition-all active:scale-[0.98]"
             >
               Add Relation
             </button>
@@ -208,39 +215,40 @@ export const RelationEditor: React.FC<RelationEditorProps> = ({
 
       {/* Outgoing Relations */}
       {outgoingRelations.length > 0 && (
-        <div>
-          <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+        <div className="animate-in fade-in duration-300">
+          <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
             Outgoing Relations
           </h4>
           <div className="space-y-2">
             {outgoingRelations.map((rel) => (
               <div
                 key={rel.id}
-                className="flex items-center gap-3 p-3 bg-white border rounded-lg group"
+                className="flex items-center gap-3 p-3 bg-white border border-slate-200 rounded-xl group hover:border-blue-300 hover:shadow-sm transition-all duration-200"
               >
-                <span className="font-medium text-gray-800">{keyword.title}</span>
+                <span className="text-sm font-bold text-slate-700">{keyword.title}</span>
                 <span
-                  className={`px-2 py-0.5 text-xs font-medium rounded-full border ${getRelationColor(
+                  className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-lg border ${getRelationColor(
                     rel.relation_type
                   )}`}
                 >
                   {rel.relation_type}
                 </span>
-                <ArrowRight className="w-4 h-4 text-gray-400" />
-                <span className="font-medium text-gray-800">
+                <ArrowRight className="w-4 h-4 text-slate-300" />
+                <span className="text-sm font-bold text-slate-700">
                   {getKeywordTitle(rel.to_keyword_id)}
                 </span>
                 {rel.note && (
-                  <span className="text-sm text-gray-500 italic">({rel.note})</span>
+                  <span className="text-xs font-medium text-slate-500 italic bg-slate-50 px-2 py-0.5 rounded-md">({rel.note})</span>
                 )}
                 {rel.bidirectional && (
-                  <span title="Bidirectional">
-                    <Link2 className="w-4 h-4 text-gray-400" />
+                  <span title="Bidirectional" className="bg-slate-50 p-1 rounded-md">
+                    <Link2 className="w-3.5 h-3.5 text-slate-400" />
                   </span>
                 )}
                 <button
                   onClick={() => onRemoveRelation(rel.id)}
-                  className="ml-auto p-1 text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="ml-auto p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all"
+                  title="Remove relation"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
@@ -252,30 +260,30 @@ export const RelationEditor: React.FC<RelationEditorProps> = ({
 
       {/* Incoming Relations */}
       {incomingRelations.length > 0 && (
-        <div>
-          <h4 className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+        <div className="animate-in fade-in duration-300">
+          <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">
             Incoming Relations
           </h4>
           <div className="space-y-2">
             {incomingRelations.map((rel) => (
               <div
                 key={rel.id}
-                className="flex items-center gap-3 p-3 bg-gray-50 border rounded-lg"
+                className="flex items-center gap-3 p-3 bg-slate-50/50 border border-slate-200 rounded-xl"
               >
-                <span className="font-medium text-gray-600">
+                <span className="text-sm font-bold text-slate-600">
                   {getKeywordTitle(rel.from_keyword_id)}
                 </span>
                 <span
-                  className={`px-2 py-0.5 text-xs font-medium rounded-full border ${getRelationColor(
+                  className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded-lg border ${getRelationColor(
                     rel.relation_type
                   )}`}
                 >
                   {rel.relation_type}
                 </span>
-                <ArrowRight className="w-4 h-4 text-gray-400" />
-                <span className="font-medium text-gray-800">{keyword.title}</span>
+                <ArrowRight className="w-4 h-4 text-slate-300" />
+                <span className="text-sm font-bold text-slate-800">{keyword.title}</span>
                 {rel.note && (
-                  <span className="text-sm text-gray-500 italic">({rel.note})</span>
+                  <span className="text-xs font-medium text-slate-500 italic bg-white border border-slate-100 px-2 py-0.5 rounded-md">({rel.note})</span>
                 )}
               </div>
             ))}
@@ -285,12 +293,14 @@ export const RelationEditor: React.FC<RelationEditorProps> = ({
 
       {/* Empty State */}
       {outgoingRelations.length === 0 && incomingRelations.length === 0 && !isAdding && (
-        <div className="text-center py-8 text-gray-400">
-          <Link2 className="w-10 h-10 mx-auto mb-2 opacity-50" />
-          <p className="text-sm">No relations defined yet.</p>
+        <div className="text-center py-12 bg-slate-50/50 border border-slate-200 border-dashed rounded-2xl">
+          <div className="w-12 h-12 bg-white rounded-xl shadow-sm flex items-center justify-center mx-auto mb-3">
+            <Link2 className="w-6 h-6 text-slate-300" />
+          </div>
+          <p className="text-sm font-medium text-slate-500 mb-2">No relations defined yet.</p>
           <button
             onClick={() => setIsAdding(true)}
-            className="mt-2 text-blue-500 hover:underline text-sm"
+            className="text-sm font-bold text-blue-600 hover:text-blue-700 hover:underline transition-colors"
           >
             Add your first relation
           </button>
