@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireOrgContext, audit, authErrorResponse } from '@/lib/auth';
 import { createEmbedding, chatCompletion, rerankChunks } from '@/lib/openai';
 import { buildAIContext, getSystemPrompt, extractPotentialKeywords, rankChunks } from '@/lib/ai-context';
+import { getDependencyContext, edgesToRelations } from '@/lib/ontology/graph';
 import { Keyword, KeywordRelation, Chunk, AskAIResponse } from '@/types';
 
 type ChunkWithSimilarity = Chunk & { similarity: number };
@@ -67,23 +68,37 @@ export async function POST(req: NextRequest) {
       relevantKeywords = rootKeywords || [];
     }
 
-    // 5. Get relations for relevant keywords
+    // 5. Relation-aware expansion: follow the dependency graph from the matched
+    // keywords (depth-limited, relevance-scored) so the AI sees required
+    // dependencies, not just the directly mentioned concepts.
     let relations: KeywordRelation[] = [];
-    if (include_relations && relevantKeywordIds.length > 0) {
-      const { data: relData } = await supabase
-        .from('keyword_relations')
-        .select(`
-          *,
-          from_keyword:keywords!from_keyword_id(id, title),
-          to_keyword:keywords!to_keyword_id(id, title)
-        `)
-        .eq('organization_id', ctx.org.id)
-        .or(
-          relevantKeywordIds
-            .map((id) => `from_keyword_id.eq.${id},to_keyword_id.eq.${id}`)
-            .join(',')
-        );
-      relations = relData || [];
+    const relevanceByKeywordId = new Map<string, number>(
+      relevantKeywordIds.map((kid: string) => [kid, 1])
+    );
+    let retrievalKeywordIds: string[] = relevantKeywordIds;
+
+    if (relevantKeywordIds.length > 0) {
+      const depContext = await getDependencyContext(supabase, ctx.org.id, relevantKeywordIds, {
+        maxDepth: 2,
+        maxNodes: 15,
+        intent: 'general',
+      });
+
+      const known = new Set(relevantKeywords.map((k) => k.id));
+      for (const node of depContext.nodes) {
+        relevanceByKeywordId.set(node.keyword.id, node.relevance);
+        if (!known.has(node.keyword.id)) {
+          relevantKeywords.push(node.keyword);
+          known.add(node.keyword.id);
+        }
+      }
+
+      if (include_relations) {
+        relations = edgesToRelations(depContext.edges);
+      }
+
+      // Widen document retrieval to the dependency neighbourhood
+      retrievalKeywordIds = Array.from(known);
     }
 
     // 6. Search for relevant document chunks
@@ -153,18 +168,18 @@ export async function POST(req: NextRequest) {
         // If it's not deployed in Supabase yet, fall back to vector-only search.
         let candidates: ChunkWithSimilarity[] = [];
         try {
-          candidates = await tryHybrid(relevantKeywordIds.length > 0 ? relevantKeywordIds : null);
+          candidates = await tryHybrid(retrievalKeywordIds.length > 0 ? retrievalKeywordIds : null);
         } catch (e: any) {
           const msg = String(e?.message ?? e ?? '');
           const likelyMissingRpc = msg.includes('match_chunks_hybrid') || msg.includes('PGRST') || msg.includes('not found');
           if (!likelyMissingRpc) throw e;
-          candidates = await tryVectorOnly(relevantKeywordIds.length > 0 ? relevantKeywordIds : null);
+          candidates = await tryVectorOnly(retrievalKeywordIds.length > 0 ? retrievalKeywordIds : null);
         }
 
         relevantChunks = rankChunks(candidates, { minSimilarity: 0.6, maxChunks: 25 });
 
         // Fallback: if keyword-scoped retrieval yields nothing, try a small global retrieval.
-        if (relevantChunks.length === 0 && relevantKeywordIds.length > 0) {
+        if (relevantChunks.length === 0 && retrievalKeywordIds.length > 0) {
           let globalCandidates: ChunkWithSimilarity[] = [];
           try {
             globalCandidates = await tryHybrid(null);
@@ -250,7 +265,7 @@ export async function POST(req: NextRequest) {
         type: 'keyword' as const,
         id: k.id,
         title: k.title,
-        relevance: 1,
+        relevance: relevanceByKeywordId.get(k.id) ?? 1,
       })),
       ...relevantChunks.slice(0, 5).map((c) => ({
         type: 'chunk' as const,

@@ -20,8 +20,13 @@ Existing prototype gives a head start on M2 (keyword CRUD/tree/definitions), M4 
 - [x] Missing-definition detection filter + completeness badges in the explorer
 - [x] Import/export: JSON + CSV, upsert by slug, parent linking by slug
 
-## M3 — Relations & Graph
-Graph view page (visual); traversal API (`get_dependency_context`) with depth limits, relation-type filters, relevance scoring; relation versioning.
+## M3 — Relations & Graph ✅ (done)
+- [x] Traversal engine `src/lib/ontology/graph.ts`: BFS with depth limits, per-intent relation-type allowlists, relevance scoring (strength × depth decay × completeness), hard node caps
+- [x] `POST /api/graph/context` — the `get_dependency_context` primitive; `GET /api/graph` — full org graph
+- [x] Relation-aware AI context: `/api/ask` expands matched keywords through the dependency graph (depth ≤ 2) and widens document retrieval to the dependency neighbourhood; keyword sources carry relevance scores
+- [x] Visual graph view (`/graph`): force-directed layout, relation-category filters, hierarchy toggle, focus mode with depth control, neighbor highlighting, node side panel
+- [x] Relation versioning (migration 0004: `keyword_relation_versions` + trigger, attributed deletions)
+- [x] Full 27-type relation vocabulary in the relation editor
 
 ## M4 — Assets & Ingestion hardening
 Processing status lifecycle; OCR fallback; language detection; auto-summary; keyword-link suggestions on upload; provenance metadata; signed-URL-only access.
