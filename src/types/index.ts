@@ -120,7 +120,20 @@ export type RelationType =
   | 'triggers'
   | 'blocks'
   | 'succeeds'
-  | 'precedes';
+  | 'precedes'
+  | 'produces'
+  | 'affects'
+  | 'enables'
+  | 'uses'
+  | 'generated-by'
+  | 'measured-by'
+  | 'reported-in'
+  | 'calculated-from'
+  | 'validated-by'
+  | 'conflicts-with'
+  | 'replaces'
+  | 'derived-from'
+  | 'belongs-to';
 
 export interface KeywordRelation {
   id: string;

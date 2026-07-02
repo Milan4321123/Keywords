@@ -137,6 +137,27 @@ export async function DELETE(req: NextRequest) {
 
     if (error) throw error;
 
+    // Attribute the deletion snapshot the trigger just created to this user.
+    // Non-fatal: tolerates databases where migration 0004 isn't applied yet.
+    try {
+      const { data: latestVersion } = await ctx.supabase
+        .from('keyword_relation_versions')
+        .select('id')
+        .eq('relation_id', id)
+        .is('changed_by', null)
+        .order('version_no', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (latestVersion) {
+        await ctx.supabase
+          .from('keyword_relation_versions')
+          .update({ changed_by: ctx.user.id })
+          .eq('id', latestVersion.id);
+      }
+    } catch {
+      // versioning table missing — snapshot attribution skipped
+    }
+
     await audit(ctx, 'relation.delete', { type: 'relation', id });
 
     if (existing) {

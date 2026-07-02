@@ -43,6 +43,19 @@ const RELATION_WEIGHT: Record<RelationType, number> = {
   blocks: 1.0,
   succeeds: 0.7,
   precedes: 0.7,
+  produces: 0.8,
+  affects: 0.85,
+  enables: 0.8,
+  uses: 0.6,
+  'generated-by': 0.6,
+  'measured-by': 0.7,
+  'reported-in': 0.4,
+  'calculated-from': 0.9,
+  'validated-by': 0.6,
+  'conflicts-with': 0.75,
+  replaces: 0.5,
+  'derived-from': 0.7,
+  'belongs-to': 0.4,
 };
 
 async function fetchRows(params: {
