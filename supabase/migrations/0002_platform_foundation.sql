@@ -1,0 +1,594 @@
+-- =====================================================
+-- Migration 0002: Platform Foundation (Milestone 1)
+-- Multi-tenancy, auth profiles, RBAC, audit, versioning,
+-- keyword typing, extended relations, intelligence tables.
+-- Idempotent where possible; safe on both fresh installs
+-- and databases created from schema.sql v1.
+-- =====================================================
+
+-- =====================================================
+-- 1. ENUMS
+-- =====================================================
+
+do $$ begin
+  create type org_role as enum ('owner', 'admin', 'manager', 'analyst', 'editor', 'viewer', 'guest');
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create type keyword_type as enum (
+    'concept', 'process', 'metric', 'dataset', 'document_type', 'role',
+    'task_type', 'workflow_step', 'department', 'entity', 'kpi',
+    'report_type', 'risk', 'rule', 'skill'
+  );
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create type keyword_status as enum ('draft', 'active', 'archived');
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create type processing_status as enum ('pending', 'processing', 'processed', 'failed');
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create type task_status as enum ('todo', 'in_progress', 'blocked', 'done', 'cancelled');
+exception when duplicate_object then null; end $$;
+
+do $$ begin
+  create type task_priority as enum ('low', 'medium', 'high', 'urgent');
+exception when duplicate_object then null; end $$;
+
+-- Extend relation types to the full spec vocabulary (hyphen style, v1 convention)
+alter type relation_type add value if not exists 'produces';
+alter type relation_type add value if not exists 'affects';
+alter type relation_type add value if not exists 'enables';
+alter type relation_type add value if not exists 'uses';
+alter type relation_type add value if not exists 'generated-by';
+alter type relation_type add value if not exists 'measured-by';
+alter type relation_type add value if not exists 'reported-in';
+alter type relation_type add value if not exists 'calculated-from';
+alter type relation_type add value if not exists 'validated-by';
+alter type relation_type add value if not exists 'conflicts-with';
+alter type relation_type add value if not exists 'replaces';
+alter type relation_type add value if not exists 'derived-from';
+alter type relation_type add value if not exists 'belongs-to';
+
+-- =====================================================
+-- 2. TENANCY & IDENTITY
+-- =====================================================
+
+create table if not exists organizations (
+  id uuid primary key default gen_random_uuid(),
+  name text not null check (char_length(trim(name)) > 0),
+  slug text unique not null check (char_length(trim(slug)) > 0),
+  industry text,
+  timezone text not null default 'UTC',
+  default_language text not null default 'en',
+  settings jsonb not null default '{}',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+-- Mirror of auth.users for joinable profile data
+create table if not exists profiles (
+  id uuid primary key references auth.users(id) on delete cascade,
+  email text not null,
+  full_name text,
+  avatar_url text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create or replace function public.handle_new_user()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  insert into public.profiles (id, email, full_name)
+  values (new.id, new.email, coalesce(new.raw_user_meta_data->>'full_name', ''))
+  on conflict (id) do update set email = excluded.email;
+  return new;
+end;
+$$;
+
+drop trigger if exists on_auth_user_created on auth.users;
+create trigger on_auth_user_created
+  after insert on auth.users
+  for each row execute function public.handle_new_user();
+
+create table if not exists organization_members (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references organizations(id) on delete cascade,
+  user_id uuid not null references profiles(id) on delete cascade,
+  role org_role not null default 'viewer',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (organization_id, user_id)
+);
+
+create index if not exists idx_org_members_org on organization_members(organization_id);
+create index if not exists idx_org_members_user on organization_members(user_id);
+
+create table if not exists organization_invites (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references organizations(id) on delete cascade,
+  email text not null,
+  role org_role not null default 'viewer',
+  invited_by uuid references profiles(id) on delete set null,
+  accepted_at timestamptz,
+  expires_at timestamptz not null default now() + interval '14 days',
+  created_at timestamptz not null default now(),
+  unique (organization_id, email)
+);
+
+create index if not exists idx_org_invites_email on organization_invites(lower(email));
+
+create table if not exists audit_logs (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references organizations(id) on delete cascade,
+  actor_id uuid references profiles(id) on delete set null,
+  action text not null,           -- e.g. 'keyword.create', 'member.role_change', 'ai.ask'
+  entity_type text,               -- 'keyword' | 'relation' | 'asset' | 'dataset' | ...
+  entity_id uuid,
+  details jsonb not null default '{}',
+  ip_address text,
+  user_agent text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_audit_org_created on audit_logs(organization_id, created_at desc);
+create index if not exists idx_audit_entity on audit_logs(entity_type, entity_id);
+
+-- =====================================================
+-- 3. ADD organization_id TO EXISTING TABLES
+-- =====================================================
+
+alter table keywords          add column if not exists organization_id uuid references organizations(id) on delete cascade;
+alter table keyword_relations add column if not exists organization_id uuid references organizations(id) on delete cascade;
+alter table assets            add column if not exists organization_id uuid references organizations(id) on delete cascade;
+alter table chunks            add column if not exists organization_id uuid references organizations(id) on delete cascade;
+alter table voice_recordings  add column if not exists organization_id uuid references organizations(id) on delete cascade;
+alter table chat_sessions     add column if not exists organization_id uuid references organizations(id) on delete cascade;
+alter table datasets          add column if not exists organization_id uuid references organizations(id) on delete cascade;
+
+-- Backfill any pre-existing single-tenant data into a claimable default org
+do $$
+declare
+  default_org uuid := '00000000-0000-0000-0000-000000000000';
+  has_orphans boolean;
+begin
+  select exists (select 1 from keywords where organization_id is null)
+      or exists (select 1 from assets where organization_id is null)
+      or exists (select 1 from datasets where organization_id is null)
+      or exists (select 1 from chat_sessions where organization_id is null)
+    into has_orphans;
+
+  if has_orphans then
+    insert into organizations (id, name, slug)
+    values (default_org, 'Default Organization', 'default')
+    on conflict (id) do nothing;
+
+    update keywords set organization_id = default_org where organization_id is null;
+    update keyword_relations set organization_id = default_org where organization_id is null;
+    update assets set organization_id = default_org where organization_id is null;
+    update voice_recordings vr set organization_id = coalesce(
+      (select k.organization_id from keywords k where k.id = vr.keyword_id), default_org)
+      where vr.organization_id is null;
+    update chunks c set organization_id = coalesce(
+      (select a.organization_id from assets a where a.id = c.asset_id), default_org)
+      where c.organization_id is null;
+    update chat_sessions set organization_id = default_org where organization_id is null;
+    update datasets set organization_id = default_org where organization_id is null;
+  end if;
+end $$;
+
+alter table keywords          alter column organization_id set not null;
+alter table keyword_relations alter column organization_id set not null;
+alter table assets            alter column organization_id set not null;
+alter table chunks            alter column organization_id set not null;
+alter table datasets          alter column organization_id set not null;
+
+create index if not exists idx_keywords_org on keywords(organization_id);
+create index if not exists idx_relations_org on keyword_relations(organization_id);
+create index if not exists idx_assets_org on assets(organization_id);
+create index if not exists idx_chunks_org on chunks(organization_id);
+create index if not exists idx_datasets_org on datasets(organization_id);
+create index if not exists idx_chat_sessions_org on chat_sessions(organization_id);
+
+-- Keyword slugs are unique per organization, not globally
+alter table keywords drop constraint if exists keywords_slug_key;
+create unique index if not exists idx_keywords_org_slug on keywords(organization_id, slug);
+
+-- =====================================================
+-- 4. KEYWORD TYPING, STATUS, OWNERSHIP, COMPLETENESS
+-- =====================================================
+
+alter table keywords add column if not exists keyword_type keyword_type not null default 'concept';
+alter table keywords add column if not exists status keyword_status not null default 'active';
+alter table keywords add column if not exists completeness_score integer not null default 0
+  check (completeness_score >= 0 and completeness_score <= 100);
+alter table keywords add column if not exists owner_member_id uuid references organization_members(id) on delete set null;
+
+-- Asset lifecycle metadata
+alter table assets add column if not exists title text;
+alter table assets add column if not exists description text;
+alter table assets add column if not exists source text;
+alter table assets add column if not exists processing_status processing_status not null default 'processed';
+
+-- Dataset ↔ keyword link + status
+alter table datasets add column if not exists keyword_id uuid references keywords(id) on delete set null;
+alter table datasets add column if not exists status text not null default 'active';
+create index if not exists idx_datasets_keyword on datasets(keyword_id);
+
+-- =====================================================
+-- 5. KEYWORD VERSIONING (trigger-based snapshots)
+-- =====================================================
+
+create table if not exists keyword_versions (
+  id uuid primary key default gen_random_uuid(),
+  keyword_id uuid not null,
+  organization_id uuid not null references organizations(id) on delete cascade,
+  version_no integer not null,
+  snapshot jsonb not null,
+  change_type text not null check (change_type in ('UPDATE', 'DELETE')),
+  changed_by uuid references profiles(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_keyword_versions_keyword on keyword_versions(keyword_id, version_no desc);
+create index if not exists idx_keyword_versions_org on keyword_versions(organization_id);
+
+create or replace function snapshot_keyword_version()
+returns trigger
+language plpgsql
+as $$
+begin
+  insert into keyword_versions (keyword_id, organization_id, version_no, snapshot, change_type)
+  values (
+    old.id,
+    old.organization_id,
+    coalesce((select max(version_no) from keyword_versions where keyword_id = old.id), 0) + 1,
+    to_jsonb(old),
+    tg_op
+  );
+  return coalesce(new, old);
+end;
+$$;
+
+drop trigger if exists keywords_version_snapshot on keywords;
+create trigger keywords_version_snapshot
+  before update or delete on keywords
+  for each row execute function snapshot_keyword_version();
+
+-- =====================================================
+-- 6. INTELLIGENCE FOUNDATION TABLES (features land M6–M10)
+-- =====================================================
+
+create table if not exists metrics (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references organizations(id) on delete cascade,
+  keyword_id uuid references keywords(id) on delete set null,
+  name text not null,
+  description text,
+  formula text,                        -- human-readable business formula
+  aggregation text,                    -- sum | count | avg | min | max | custom
+  source_table_id uuid references dataset_tables(id) on delete set null,
+  value_column text,
+  date_column text,
+  dimensions text[] not null default '{}',
+  filters jsonb not null default '[]',
+  time_grain text not null default 'month',
+  caveats text,
+  owner_member_id uuid references organization_members(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (organization_id, name)
+);
+
+create index if not exists idx_metrics_org on metrics(organization_id);
+create index if not exists idx_metrics_keyword on metrics(keyword_id);
+
+create table if not exists metric_versions (
+  id uuid primary key default gen_random_uuid(),
+  metric_id uuid not null,
+  organization_id uuid not null references organizations(id) on delete cascade,
+  version_no integer not null,
+  snapshot jsonb not null,
+  changed_by uuid references profiles(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_metric_versions_metric on metric_versions(metric_id, version_no desc);
+
+create table if not exists ai_skills (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references organizations(id) on delete cascade,
+  keyword_id uuid references keywords(id) on delete cascade,
+  name text not null,
+  description text,
+  skill_type text not null default 'qa' check (skill_type in
+    ('qa','summary','report','analysis','forecast','workflow','data_quality','classification','extraction','recommendation')),
+  required_data jsonb not null default '{}',
+  tools_used text[] not null default '{}',
+  prompt_template text,
+  output_schema jsonb,
+  min_role org_role not null default 'viewer',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_ai_skills_org on ai_skills(organization_id);
+create index if not exists idx_ai_skills_keyword on ai_skills(keyword_id);
+
+create table if not exists ai_context_logs (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references organizations(id) on delete cascade,
+  session_id uuid references chat_sessions(id) on delete set null,
+  message_id uuid references chat_messages(id) on delete set null,
+  user_id uuid references profiles(id) on delete set null,
+  question text,
+  intent text,
+  context jsonb not null default '{}',   -- keywords/relations/chunks/rows/tools used
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_ai_context_logs_org on ai_context_logs(organization_id, created_at desc);
+
+create table if not exists reports (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references organizations(id) on delete cascade,
+  keyword_id uuid references keywords(id) on delete set null,
+  title text not null,
+  report_type text not null default 'custom',
+  period_start date,
+  period_end date,
+  sections jsonb not null default '[]',
+  sources jsonb not null default '[]',
+  status text not null default 'draft' check (status in ('draft','final','archived')),
+  created_by uuid references profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_reports_org on reports(organization_id, created_at desc);
+
+create table if not exists report_versions (
+  id uuid primary key default gen_random_uuid(),
+  report_id uuid not null references reports(id) on delete cascade,
+  organization_id uuid not null references organizations(id) on delete cascade,
+  version_no integer not null,
+  snapshot jsonb not null,
+  changed_by uuid references profiles(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists tasks (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references organizations(id) on delete cascade,
+  keyword_id uuid references keywords(id) on delete set null,
+  parent_task_id uuid references tasks(id) on delete cascade,
+  title text not null,
+  description text,
+  status task_status not null default 'todo',
+  priority task_priority not null default 'medium',
+  assignee_member_id uuid references organization_members(id) on delete set null,
+  due_date date,
+  source_asset_id uuid references assets(id) on delete set null,
+  created_by uuid references profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_tasks_org_status on tasks(organization_id, status);
+create index if not exists idx_tasks_keyword on tasks(keyword_id);
+create index if not exists idx_tasks_parent on tasks(parent_task_id);
+
+create table if not exists task_dependencies (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references organizations(id) on delete cascade,
+  task_id uuid not null references tasks(id) on delete cascade,
+  depends_on_task_id uuid not null references tasks(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  unique (task_id, depends_on_task_id),
+  check (task_id <> depends_on_task_id)
+);
+
+create table if not exists workflows (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references organizations(id) on delete cascade,
+  keyword_id uuid references keywords(id) on delete set null,
+  name text not null,
+  description text,
+  is_template boolean not null default true,
+  created_by uuid references profiles(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists workflow_steps (
+  id uuid primary key default gen_random_uuid(),
+  workflow_id uuid not null references workflows(id) on delete cascade,
+  organization_id uuid not null references organizations(id) on delete cascade,
+  keyword_id uuid references keywords(id) on delete set null,
+  step_order integer not null,
+  name text not null,
+  description text,
+  created_at timestamptz not null default now(),
+  unique (workflow_id, step_order)
+);
+
+create table if not exists data_quality_issues (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references organizations(id) on delete cascade,
+  entity_type text not null,           -- 'keyword' | 'dataset_table' | 'dataset_row' | 'relation'
+  entity_id uuid not null,
+  issue_type text not null,            -- 'missing_field' | 'duplicate' | 'invalid_value' | 'undefined_keyword' | ...
+  severity text not null default 'warning' check (severity in ('info','warning','error')),
+  description text,
+  status text not null default 'open' check (status in ('open','resolved','ignored')),
+  details jsonb not null default '{}',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists idx_dq_issues_org_status on data_quality_issues(organization_id, status);
+
+create table if not exists forecasts (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references organizations(id) on delete cascade,
+  metric_id uuid references metrics(id) on delete cascade,
+  name text not null,
+  horizon_periods integer not null default 3,
+  time_grain text not null default 'month',
+  created_by uuid references profiles(id) on delete set null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists forecast_runs (
+  id uuid primary key default gen_random_uuid(),
+  forecast_id uuid not null references forecasts(id) on delete cascade,
+  organization_id uuid not null references organizations(id) on delete cascade,
+  model text,
+  history_points integer,
+  assumptions jsonb not null default '{}',
+  results jsonb not null default '[]',   -- [{period, value, lower, upper}]
+  status text not null default 'pending' check (status in ('pending','running','done','failed')),
+  created_at timestamptz not null default now()
+);
+
+-- =====================================================
+-- 7. updated_at TRIGGERS FOR NEW TABLES
+-- =====================================================
+
+do $$
+declare t text;
+begin
+  foreach t in array array['organizations','profiles','organization_members','metrics',
+                           'ai_skills','reports','tasks','workflows','data_quality_issues']
+  loop
+    execute format('drop trigger if exists %I_updated_at on %I', t, t);
+    execute format('create trigger %I_updated_at before update on %I
+                    for each row execute function update_updated_at()', t, t);
+  end loop;
+end $$;
+
+-- =====================================================
+-- 8. ROW LEVEL SECURITY
+-- API routes enforce permissions in code with the service
+-- client; RLS is defense-in-depth for anon/browser access.
+-- =====================================================
+
+create or replace function public.current_member_role(org uuid)
+returns text
+language sql
+stable
+security definer set search_path = public
+as $$
+  select role::text from organization_members
+  where organization_id = org and user_id = auth.uid()
+  limit 1;
+$$;
+
+-- Tenant content tables: members read; content roles write
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'keywords','keyword_relations','assets','keyword_assets','chunks','voice_recordings',
+    'chat_sessions','chat_messages','datasets','dataset_tables','dataset_columns','dataset_rows',
+    'keyword_versions','metrics','metric_versions','ai_skills','ai_context_logs',
+    'reports','report_versions','tasks','task_dependencies','workflows','workflow_steps',
+    'data_quality_issues','forecasts','forecast_runs'
+  ]
+  loop
+    execute format('alter table %I enable row level security', t);
+  end loop;
+end $$;
+
+-- Tables with a direct organization_id column get member policies
+do $$
+declare t text;
+begin
+  foreach t in array array[
+    'keywords','keyword_relations','assets','chunks','voice_recordings','chat_sessions',
+    'datasets','keyword_versions','metrics','metric_versions','ai_skills','ai_context_logs',
+    'reports','report_versions','tasks','task_dependencies','workflows','workflow_steps',
+    'data_quality_issues','forecasts','forecast_runs'
+  ]
+  loop
+    execute format('drop policy if exists %I_member_select on %I', t, t);
+    execute format('create policy %I_member_select on %I for select
+                    using (public.current_member_role(organization_id) is not null)', t, t);
+    execute format('drop policy if exists %I_editor_write on %I', t, t);
+    execute format('create policy %I_editor_write on %I for all
+                    using (public.current_member_role(organization_id) in (''owner'',''admin'',''manager'',''editor''))
+                    with check (public.current_member_role(organization_id) in (''owner'',''admin'',''manager'',''editor''))', t, t);
+  end loop;
+end $$;
+
+-- Child tables scoped via parent
+drop policy if exists keyword_assets_member_select on keyword_assets;
+create policy keyword_assets_member_select on keyword_assets for select
+  using (exists (select 1 from keywords k where k.id = keyword_id
+                 and public.current_member_role(k.organization_id) is not null));
+drop policy if exists keyword_assets_editor_write on keyword_assets;
+create policy keyword_assets_editor_write on keyword_assets for all
+  using (exists (select 1 from keywords k where k.id = keyword_id
+                 and public.current_member_role(k.organization_id) in ('owner','admin','manager','editor')));
+
+drop policy if exists chat_messages_member_select on chat_messages;
+create policy chat_messages_member_select on chat_messages for select
+  using (exists (select 1 from chat_sessions s where s.id = session_id
+                 and public.current_member_role(s.organization_id) is not null));
+
+drop policy if exists dataset_tables_member_select on dataset_tables;
+create policy dataset_tables_member_select on dataset_tables for select
+  using (exists (select 1 from datasets d where d.id = dataset_id
+                 and public.current_member_role(d.organization_id) is not null));
+
+drop policy if exists dataset_columns_member_select on dataset_columns;
+create policy dataset_columns_member_select on dataset_columns for select
+  using (exists (select 1 from dataset_tables dt join datasets d on d.id = dt.dataset_id
+                 where dt.id = dataset_table_id
+                 and public.current_member_role(d.organization_id) is not null));
+
+drop policy if exists dataset_rows_member_select on dataset_rows;
+create policy dataset_rows_member_select on dataset_rows for select
+  using (exists (select 1 from dataset_tables dt join datasets d on d.id = dt.dataset_id
+                 where dt.id = dataset_table_id
+                 and public.current_member_role(d.organization_id) is not null));
+
+-- Org/identity tables
+alter table organizations enable row level security;
+drop policy if exists organizations_member_select on organizations;
+create policy organizations_member_select on organizations for select
+  using (public.current_member_role(id) is not null);
+drop policy if exists organizations_admin_update on organizations;
+create policy organizations_admin_update on organizations for update
+  using (public.current_member_role(id) in ('owner','admin'));
+
+alter table profiles enable row level security;
+drop policy if exists profiles_self_select on profiles;
+create policy profiles_self_select on profiles for select using (auth.uid() = id);
+drop policy if exists profiles_self_update on profiles;
+create policy profiles_self_update on profiles for update using (auth.uid() = id);
+
+alter table organization_members enable row level security;
+drop policy if exists org_members_member_select on organization_members;
+create policy org_members_member_select on organization_members for select
+  using (public.current_member_role(organization_id) is not null);
+drop policy if exists org_members_admin_write on organization_members;
+create policy org_members_admin_write on organization_members for all
+  using (public.current_member_role(organization_id) in ('owner','admin'));
+
+alter table organization_invites enable row level security;
+drop policy if exists org_invites_admin_all on organization_invites;
+create policy org_invites_admin_all on organization_invites for all
+  using (public.current_member_role(organization_id) in ('owner','admin'));
+
+alter table audit_logs enable row level security;
+drop policy if exists audit_admin_select on audit_logs;
+create policy audit_admin_select on audit_logs for select
+  using (public.current_member_role(organization_id) in ('owner','admin'));
+-- append-only: no update/delete policies on audit_logs
