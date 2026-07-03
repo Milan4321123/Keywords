@@ -23,6 +23,30 @@ export interface ChunkResult {
 }
 
 /** The grounded context envelope (docs/05-ai-system.md), persisted to ai_context_logs. */
+export interface MetricContext {
+  id: string;
+  name: string;
+  description: string | null;
+  formula: string | null;
+  aggregation: string | null;
+  source_table_id: string | null;
+  value_column: string | null;
+  date_column: string | null;
+  time_grain: string;
+  caveats: string | null;
+  keyword_id: string | null;
+}
+
+export interface WorkflowTaskContext {
+  id: string;
+  title: string;
+  status: string;
+  priority: string;
+  due_date: string | null;
+  keyword_id: string | null;
+  blocked_by: string[];
+}
+
 export interface ContextEnvelope {
   organization: { id: string; name: string };
   user: { id: string; email: string };
@@ -32,8 +56,9 @@ export interface ContextEnvelope {
   relevant_keywords: Array<{ id: string; title: string; relevance: number; via: string }>;
   dependency_keywords: Array<{ id: string; title: string; relevance: number; via: string }>;
   business_rules: Array<{ keyword: string; rule: string }>;
-  metric_definitions: never[];
+  metric_definitions: MetricContext[];
   dataset_schemas: DatasetTableSchema[];
+  workflow_context: WorkflowTaskContext[];
   chunks_used: Array<{ id: string; asset_id: string | null; similarity: number }>;
   missing_data: string[];
   system_instructions: string;
@@ -45,6 +70,7 @@ export interface BuiltContext {
   dependency: DependencyContext;
   chunks: ChunkResult[];
   datasetSchemas: DatasetTableSchema[];
+  metrics: MetricContext[];
   contextText: string;
 }
 
@@ -145,6 +171,41 @@ export async function buildContext(
     return aLinked - bLinked;
   });
 
+  // 3b. Metric definitions: metrics linked to routed keywords first, then the rest
+  const { data: metricRows } = await supabase
+    .from('metrics')
+    .select('id, name, description, formula, aggregation, source_table_id, value_column, date_column, time_grain, caveats, keyword_id')
+    .eq('organization_id', ctx.org.id)
+    .limit(30);
+  const metrics: MetricContext[] = ((metricRows ?? []) as MetricContext[]).sort((a, b) => {
+    const aLinked = a.keyword_id && keywordIds.includes(a.keyword_id) ? 0 : 1;
+    const bLinked = b.keyword_id && keywordIds.includes(b.keyword_id) ? 0 : 1;
+    return aLinked - bLinked;
+  });
+
+  // 3c. Workflow context: open tasks around the routed keywords
+  let workflowContext: WorkflowTaskContext[] = [];
+  if (intent === 'workflow' || intent === 'report') {
+    let taskQuery = supabase
+      .from('tasks')
+      .select('id, title, status, priority, due_date, keyword_id, task_dependencies!task_dependencies_task_id_fkey(depends_on_task_id)')
+      .eq('organization_id', ctx.org.id)
+      .in('status', ['todo', 'in_progress', 'blocked'])
+      .order('created_at', { ascending: false })
+      .limit(30);
+    if (keywordIds.length > 0) taskQuery = taskQuery.in('keyword_id', keywordIds);
+    const { data: taskRows } = await taskQuery;
+    workflowContext = ((taskRows ?? []) as any[]).map((t) => ({
+      id: t.id,
+      title: t.title,
+      status: t.status,
+      priority: t.priority,
+      due_date: t.due_date,
+      keyword_id: t.keyword_id,
+      blocked_by: (t.task_dependencies ?? []).map((d: any) => d.depends_on_task_id),
+    }));
+  }
+
   // 4. Document chunks (hybrid retrieval scoped to the dependency neighbourhood)
   let chunks: ChunkResult[] = [];
   try {
@@ -194,8 +255,9 @@ export async function buildContext(
       .filter((n) => n.via !== 'seed')
       .map((n) => ({ id: n.keyword.id, title: n.keyword.title, relevance: n.relevance, via: n.via })),
     business_rules: businessRules,
-    metric_definitions: [],
+    metric_definitions: metrics,
     dataset_schemas: schemas,
+    workflow_context: workflowContext,
     chunks_used: chunks.map((c) => ({ id: c.id, asset_id: c.asset_id, similarity: c.similarity })),
     missing_data: missing,
     system_instructions: 'Answer only from grounded company context and computed data.',
@@ -223,6 +285,25 @@ export async function buildContext(
       parts.push(`- ${e.from_keyword?.title} ${e.relation_type} ${e.to_keyword?.title}${e.note ? ` (${e.note})` : ''}`);
     }
   }
+  if (metrics.length > 0) {
+    parts.push('\n## Metric Catalog (compute these with the compute_metric tool — never estimate)');
+    for (const m of metrics.slice(0, 15)) {
+      parts.push(
+        `- "${m.name}" (id ${m.id}): ${m.aggregation ?? 'sum'}(${m.value_column ?? 'rows'})` +
+          `${m.date_column ? ` by ${m.time_grain} on ${m.date_column}` : ''}` +
+          `${m.formula ? ` — formula: ${m.formula}` : ''}` +
+          `${m.caveats ? ` — caveats: ${m.caveats}` : ''}`
+      );
+    }
+  }
+  if (workflowContext.length > 0) {
+    parts.push('\n## Open Tasks');
+    for (const t of workflowContext) {
+      parts.push(
+        `- [${t.status}] ${t.title} (priority ${t.priority}${t.due_date ? `, due ${t.due_date}` : ''}${t.blocked_by.length > 0 ? `, blocked by ${t.blocked_by.length} task(s)` : ''})`
+      );
+    }
+  }
   if (schemas.length > 0) {
     parts.push('\n## Available Structured Data');
     for (const s of schemas) {
@@ -247,6 +328,7 @@ export async function buildContext(
     dependency,
     chunks,
     datasetSchemas: schemas,
+    metrics,
     contextText: parts.join('\n'),
   };
 }
