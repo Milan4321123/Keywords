@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServiceClient } from '@/lib/supabase/server';
 import { requireOrgContext, audit } from '@/lib/auth';
 import { apiError } from '@/lib/api';
-import { createEmbedding } from '@/lib/openai';
+import { processAsset } from '@/lib/ingestion/process';
 import { recomputeKeywordCompleteness } from '@/lib/ontology/completeness';
-import pdf from 'pdf-parse';
 
 // POST /api/assets/upload - Upload files and link to keyword
 export async function POST(req: NextRequest) {
@@ -47,11 +45,11 @@ export async function POST(req: NextRequest) {
     // Upload to Supabase Storage under an org-scoped path
     const fileBuffer = await file.arrayBuffer();
     const safeName = file.name.replace(/[^a-zA-Z0-9._-]+/g, '_');
-    const fileName = `${ctx.org.id}/${Date.now()}-${safeName}`;
+    const storagePath = `${ctx.org.id}/${Date.now()}-${safeName}`;
 
     const { error: uploadError } = await ctx.supabase.storage
       .from('assets')
-      .upload(fileName, fileBuffer, {
+      .upload(storagePath, fileBuffer, {
         contentType: mimeType,
       });
 
@@ -59,9 +57,9 @@ export async function POST(req: NextRequest) {
 
     const { data: urlData } = ctx.supabase.storage
       .from('assets')
-      .getPublicUrl(fileName);
+      .getPublicUrl(storagePath);
 
-    // Create asset record
+    // Create asset record (file access should go through /api/assets/[id]/url)
     const { data: asset, error: assetError } = await ctx.supabase
       .from('assets')
       .insert({
@@ -72,7 +70,8 @@ export async function POST(req: NextRequest) {
         mime_type: mimeType,
         file_size: file.size,
         processed: false,
-        processing_status: 'processing',
+        processing_status: 'pending',
+        meta_json: { storage_path: storagePath, source: 'upload' },
         created_by: ctx.user.id,
       })
       .select()
@@ -95,134 +94,18 @@ export async function POST(req: NextRequest) {
       keyword_id: keywordId || null,
     });
 
-    // Queue for processing (text extraction, chunking)
-    // In a real app, this would trigger a background job
-    processAssetAsync(asset.id, ctx.org.id, fileBuffer, mimeType, keywordId);
+    // Run the ingestion pipeline. Inline for now; becomes a queued job at M11.
+    processAsset({
+      assetId: asset.id,
+      organizationId: ctx.org.id,
+      fileBuffer,
+      keywordId: keywordId || null,
+    }).catch((error) => console.error('processAsset failed:', error));
 
     return NextResponse.json({ data: asset, error: null });
   } catch (error) {
     return apiError(error, 'Failed to upload file');
   }
-}
-
-// Background processing function (simplified - in production use a job queue)
-async function processAssetAsync(
-  assetId: string,
-  organizationId: string,
-  fileBuffer?: ArrayBuffer,
-  mimeType?: string,
-  keywordId?: string
-) {
-  try {
-    const supabase = createServiceClient();
-
-    // Get asset
-    const { data: asset } = await supabase
-      .from('assets')
-      .select('*')
-      .eq('id', assetId)
-      .eq('organization_id', organizationId)
-      .single();
-
-    if (!asset) return;
-
-    // If a keyword wasn't passed explicitly, try to infer it from the link table.
-    // Note: assets can be linked to multiple keywords; in that case keep it null.
-    if (!keywordId) {
-      const { data: links } = await supabase
-        .from('keyword_assets')
-        .select('keyword_id')
-        .eq('asset_id', assetId);
-
-      if (links && links.length === 1) {
-        keywordId = links[0].keyword_id;
-      }
-    }
-
-    let extractedText = '';
-
-    // Extract text based on file type
-    if (asset.file_type === 'pdf' && fileBuffer) {
-      try {
-        // Parse PDF using pdf-parse
-        const pdfData = await pdf(Buffer.from(fileBuffer));
-        extractedText = pdfData.text;
-        console.log(`Extracted ${extractedText.length} characters from PDF: ${asset.file_name}`);
-      } catch (pdfError) {
-        console.error('PDF parsing error:', pdfError);
-        extractedText = `[Failed to extract PDF content from ${asset.file_name}]`;
-      }
-    } else if (asset.file_type === 'text') {
-      // Fetch and read text file
-      const response = await fetch(asset.file_url);
-      extractedText = await response.text();
-    } else if (asset.file_type === 'excel') {
-      // In a real app, use xlsx library
-      extractedText = `[Excel content from ${asset.file_name}]`;
-    }
-
-    // Update asset with extracted text
-    await supabase
-      .from('assets')
-      .update({
-        extracted_text: extractedText,
-        processed: true,
-        processing_status: 'processed',
-      })
-      .eq('id', assetId);
-
-    // Create chunks and embeddings
-    if (extractedText) {
-      const chunks = chunkText(extractedText);
-
-      for (let i = 0; i < chunks.length; i++) {
-        const chunkText = chunks[i];
-
-        try {
-          const embedding = await createEmbedding(chunkText);
-
-          await supabase.from('chunks').insert({
-            organization_id: organizationId,
-            asset_id: assetId,
-            keyword_id: keywordId || null,
-            chunk_index: i,
-            chunk_text: chunkText,
-            embedding: embedding,
-            token_count: Math.ceil(chunkText.length / 4), // Rough estimate
-          });
-        } catch (embeddingError) {
-          console.error('Error creating embedding:', embeddingError);
-        }
-      }
-    }
-  } catch (error) {
-    console.error('Error processing asset:', error);
-  }
-}
-
-// Simple text chunking function
-function chunkText(text: string, maxChunkSize: number = 1000): string[] {
-  const chunks: string[] = [];
-  const paragraphs = text.split(/\n\n+/);
-
-  let currentChunk = '';
-
-  for (const para of paragraphs) {
-    if (currentChunk.length + para.length > maxChunkSize) {
-      if (currentChunk) {
-        chunks.push(currentChunk.trim());
-      }
-      currentChunk = para;
-    } else {
-      currentChunk += '\n\n' + para;
-    }
-  }
-
-  if (currentChunk.trim()) {
-    chunks.push(currentChunk.trim());
-  }
-
-  return chunks;
 }
 
 // GET /api/assets/upload - Get assets (optionally filtered by keyword)

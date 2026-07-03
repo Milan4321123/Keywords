@@ -26,6 +26,7 @@ import RelationEditor from '@/components/RelationEditor';
 import AIAssistant from '@/components/AIAssistant';
 import VoiceInput from '@/components/VoiceInput';
 import ImportExportMenu from '@/components/ImportExportMenu';
+import { openAsset } from '@/lib/asset-view';
 
 function completenessDot(score: number | undefined): string {
   const s = score ?? 0;
@@ -782,7 +783,7 @@ export default function Home() {
                         existingAssets={assets}
                         onUpload={handleUploadFiles}
                         onRemove={handleRemoveAsset}
-                        onViewAsset={(asset) => window.open(asset.file_url, '_blank')}
+                        onViewAsset={(asset) => openAsset(asset)}
                       />
                     </div>
                   </div>

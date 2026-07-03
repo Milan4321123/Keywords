@@ -17,6 +17,7 @@ import { computeCompleteness } from '@/lib/ontology/completeness';
 import KeywordDetail from '@/components/KeywordDetail';
 import RelationEditor from '@/components/RelationEditor';
 import FileUpload from '@/components/FileUpload';
+import { openAsset } from '@/lib/asset-view';
 
 type Tab = 'overview' | 'relations' | 'files' | 'history';
 
@@ -337,7 +338,7 @@ export default function KeywordDetailPage() {
               existingAssets={assets}
               onUpload={handleUploadFiles}
               onRemove={(assetId) => setAssets((prev) => prev.filter((a) => a.id !== assetId))}
-              onViewAsset={(asset) => window.open(asset.file_url, '_blank')}
+              onViewAsset={(asset) => openAsset(asset)}
             />
           </div>
         )}
