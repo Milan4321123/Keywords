@@ -234,13 +234,13 @@ All routes require a signed-in member of the active organization; roles gate mut
 - [x] Ingestion hardening: OCR, summaries, keyword suggestions, signed URLs (Milestone 4)
 - [x] Semantic column mapping & data quality reports (Milestone 5)
 - [x] AI router with intent detection, context builder & grounded chat (Milestone 6)
-- [ ] Metric catalog (Milestone 7)
-- [ ] Report generator with exports (Milestone 8)
-- [ ] Forecasting service (Milestone 9)
-- [ ] Tasks & workflows (Milestone 10)
-- [ ] Production hardening: rate limits, observability, tests (Milestone 11)
+- [x] Metric catalog with grounded computation & anomaly flags (Milestone 7)
+- [x] Report generator with KPI tables, evidence & exports (Milestone 8)
+- [x] Forecasting with confidence intervals & assumptions (Milestone 9)
+- [x] Tasks, dependencies, blocked detection & AI checklists (Milestone 10)
+- [x] Rate limits, provenance guard, tests, Docker, ops runbook (Milestone 11)
 
-See [`docs/07-milestones.md`](docs/07-milestones.md) for the full plan.
+All 11 milestones from [`docs/07-milestones.md`](docs/07-milestones.md) are implemented; remaining refinements are listed under "Known deferrals" in [`docs/08-operations.md`](docs/08-operations.md).
 
 ## License
 

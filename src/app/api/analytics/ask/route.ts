@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { requireOrgContext, audit, authErrorResponse } from '@/lib/auth';
+import { enforceRateLimit } from '@/lib/rate-limit';
 import { openai } from '@/lib/openai';
 import { runTableQuery, comparePeriods, TableQuerySpec, ComparePeriodsSpec } from '@/lib/analytics';
 import { AnalyticsAskRequest } from '@/types';
@@ -40,6 +41,7 @@ async function fetchRows(params: {
 export async function POST(req: NextRequest) {
   try {
     const ctx = await requireOrgContext('run_ai');
+    enforceRateLimit('ai', ctx.user.id);
     const supabase = ctx.supabase;
     const body = (await req.json()) as AnalyticsAskRequest;
 

@@ -1,0 +1,10 @@
+node_modules
+.next
+.git
+.env*
+docs
+tests
+supabase
+*.md
+tsconfig.tsbuildinfo
+.DS_Store

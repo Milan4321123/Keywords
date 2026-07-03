@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireOrgContext, audit } from '@/lib/auth';
+import { enforceRateLimit } from '@/lib/rate-limit';
 import { apiError } from '@/lib/api';
 import { processAsset } from '@/lib/ingestion/process';
 import { recomputeKeywordCompleteness } from '@/lib/ontology/completeness';
@@ -8,6 +9,7 @@ import { recomputeKeywordCompleteness } from '@/lib/ontology/completeness';
 export async function POST(req: NextRequest) {
   try {
     const ctx = await requireOrgContext('upload_assets');
+    enforceRateLimit('upload', ctx.user.id);
     const formData = await req.formData();
 
     const file = formData.get('file') as File;

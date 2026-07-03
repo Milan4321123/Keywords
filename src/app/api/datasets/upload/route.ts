@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { requireOrgContext, audit, authErrorResponse } from '@/lib/auth';
+import { enforceRateLimit } from '@/lib/rate-limit';
 import { parseWorkbookToDatasetTables } from '@/lib/datasets';
 
 export const runtime = 'nodejs';
@@ -27,6 +28,7 @@ async function insertInChunks(
 export async function POST(req: NextRequest) {
   try {
     const ctx = await requireOrgContext('upload_assets');
+    enforceRateLimit('upload', ctx.user.id);
     const supabase = ctx.supabase;
     const formData = await req.formData();
 

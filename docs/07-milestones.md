@@ -52,20 +52,41 @@ Existing prototype gives a head start on M2 (keyword CRUD/tree/definitions), M4 
 - [x] Real AI Chat page (`/chat`): Auto/Ask/Analyze/Report/Forecast/Explain/Workflow modes, keyword + dataset scope picker, intent chip, calculations drawer, source chips, missing-data callouts
 - Deferred: keyword-embedding routing fallback; numeric-provenance regex guard (M11 hardening)
 
-## M7 — Metrics & Analytics
-Metric catalog CRUD + versions; `compute_metric`; period comparison; trend analysis; anomaly detection; data-quality reports per dataset; keyword completeness on dashboard.
+## M7 — Metrics & Analytics ✅ (done)
+- [x] Metric catalog CRUD (`/api/metrics`) with app-level version snapshots on update
+- [x] `compute_metric` engine: definition-driven aggregation, period filters, time-grain series with z-score anomaly flags, row-level evidence
+- [x] Metric definitions in the AI context + `compute_metric` tool in the router
+- [x] Metrics page: create/compute/trend bars/forecast per metric
+- [x] Dashboard banner for open data quality issues
 
-## M8 — Reports
-Template-driven generator (sections: executive summary, scope, keywords, sources, KPI table, trends, anomalies, risks, missing data, actions, evidence); saved + versioned; export PDF/DOCX/MD/HTML/CSV.
+## M8 — Reports ✅ (done)
+- [x] Generator (`src/lib/reports/generate.ts`): computes every catalog metric (value + trend + anomalies), collects open quality issues and ontology context, then the LLM writes ONLY the narrative around the computed facts
+- [x] All spec sections: executive summary, scope, keywords, data sources, KPI table, trends, anomalies, risks, missing data, recommended actions, evidence references
+- [x] Saved + versioned (`reports`/`report_versions`); exports: Markdown, CSV, styled HTML (print → PDF)
+- [x] Reports page: generate with type/period/keyword scope, full detail view
+- Deferred: DOCX export (use HTML → print)
 
-## M9 — Forecasting
-Python FastAPI service (statsmodels/prophet-class models); minimum-history guard; confidence intervals; assumptions surface; scenario runs; `forecasts/forecast_runs`.
+## M9 — Forecasting ✅ (done)
+- [x] TypeScript engine (`src/lib/forecasting/forecast.ts`): OLS trend + 95% prediction intervals; refuses below 6 history points; explicit assumptions on every result
+- [x] History always comes from the metric engine — never estimated
+- [x] `/api/forecasts` persists `forecasts`/`forecast_runs`; `forecast_metric` tool in the AI router; forecast cards on the metrics page
+- Deferred: Python service with seasonal models & scenario runs (swap-in behind the same interface)
 
-## M10 — Workflows & Tasks
-Task CRUD + subtasks + dependencies; blocked-task detection; workflow templates with keyword-linked steps; AI task summaries/checklists.
+## M10 — Workflows & Tasks ✅ (done)
+- [x] Task CRUD with keyword links, subtasks, assignees, due dates, priorities
+- [x] Dependencies with cycle guard; blocked-task detection (open dependency ⇒ blocked)
+- [x] AI checklist generation grounded in keyword definition/rules/process relations, user-approved before creation
+- [x] Tasks board (todo / in progress / blocked / done) with dependency chips
+- [x] Workflow context (open tasks) injected into AI answers for workflow/report intents
+- Deferred: workflow template UI (tables exist)
 
-## M11 — Production Hardening
-Rate limiting; observability (request ids, tracing, error reporting); test suite (unit for engine/permissions, integration for API); backup/restore runbook; Docker deployment; security review.
+## M11 — Production Hardening ✅ (done)
+- [x] Rate limiting (per-user buckets: AI 30/min, uploads 60/min, heavy jobs 20/min) on all expensive routes
+- [x] Numeric-provenance guard: answers with numbers not traceable to tool outputs get an explicit warning
+- [x] `/api/health` liveness + DB probe
+- [x] Unit test suite (`npm test`, 14 tests) covering the deterministic engines: analytics, completeness, quality, forecasting
+- [x] Dockerfile (standalone output, non-root, healthcheck) + `.dockerignore`
+- [x] Operations runbook (`docs/08-operations.md`): deploy, migrations, backups, security checklist, known deferrals
 
 ## Definition of done (every milestone)
 Typecheck clean; permissions enforced on all new routes; audit events for all mutations; docs updated; no unguarded AI numbers.

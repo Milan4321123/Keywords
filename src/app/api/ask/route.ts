@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireOrgContext, audit, authErrorResponse } from '@/lib/auth';
+import { enforceRateLimit } from '@/lib/rate-limit';
 import { createEmbedding, chatCompletion, rerankChunks } from '@/lib/openai';
 import { buildAIContext, getSystemPrompt, extractPotentialKeywords, rankChunks } from '@/lib/ai-context';
 import { getDependencyContext, edgesToRelations } from '@/lib/ontology/graph';
@@ -11,6 +12,7 @@ type ChunkWithSimilarity = Chunk & { similarity: number };
 export async function POST(req: NextRequest) {
   try {
     const ctx = await requireOrgContext('run_ai');
+    enforceRateLimit('ai', ctx.user.id);
     const supabase = ctx.supabase;
     const body = await req.json();
 

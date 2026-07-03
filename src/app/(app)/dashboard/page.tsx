@@ -19,7 +19,7 @@ export default async function DashboardPage() {
 
   const { supabase, org } = ctx;
 
-  const [keywordsRes, undefinedRes, assetsRes, datasetsRes, membersRes, activityRes] =
+  const [keywordsRes, undefinedRes, assetsRes, datasetsRes, membersRes, activityRes, qualityRes] =
     await Promise.all([
       supabase
         .from('keywords')
@@ -49,7 +49,14 @@ export default async function DashboardPage() {
         .eq('organization_id', org.id)
         .order('created_at', { ascending: false })
         .limit(8),
+      supabase
+        .from('data_quality_issues')
+        .select('id', { count: 'exact', head: true })
+        .eq('organization_id', org.id)
+        .eq('status', 'open'),
     ]);
+
+  const openQualityIssues = qualityRes.count ?? 0;
 
   const stats = [
     { label: 'Keywords', value: keywordsRes.count ?? 0, icon: FolderTree, href: '/keywords' },
@@ -76,6 +83,19 @@ export default async function DashboardPage() {
           Company intelligence overview — keywords, evidence, data, and activity.
         </p>
       </div>
+
+      {openQualityIssues > 0 && (
+        <Link
+          href="/data"
+          className="flex items-center gap-3 px-5 py-4 rounded-2xl bg-amber-50 border border-amber-200 hover:border-amber-300 transition-colors"
+        >
+          <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0" />
+          <span className="text-sm text-amber-800">
+            <span className="font-semibold">{openQualityIssues} open data quality issue{openQualityIssues > 1 ? 's' : ''}</span>
+            {' '}— review them in the Data Hub before relying on analytics.
+          </span>
+        </Link>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
