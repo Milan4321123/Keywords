@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { Dataset, DatasetRow, DatasetTable, AnalyticsAskResponse, AnalyticsRecommendationResponse, Keyword } from '@/types';
+import DatasetQualityPanel from '@/components/DatasetQualityPanel';
 
 type TableOption = { dataset: Dataset; table: DatasetTable };
 
@@ -363,6 +364,11 @@ export default function AnalyticsPage() {
                         <div key={c.id} className="text-xs text-gray-700">
                           <span className="font-mono">{c.normalized_name}</span>{' '}
                           <span className="text-gray-400">({c.data_type})</span>
+                          {(c as any).semantic_name && (
+                            <span className="ml-1.5 px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 text-[10px] font-medium">
+                              {(c as any).semantic_name}
+                            </span>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -371,6 +377,8 @@ export default function AnalyticsPage() {
               </>
             )}
           </div>
+
+          {selected && <DatasetQualityPanel tableId={selected.table.id} />}
 
           <div className="bg-white border rounded-xl p-4">
             <h2 className="font-medium text-gray-800 mb-2">Dependency Scope</h2>

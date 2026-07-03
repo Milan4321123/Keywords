@@ -113,6 +113,7 @@ export async function POST(req: NextRequest) {
         normalized_name: c.normalized_name,
         data_type: c.data_type,
         sample_values: c.sample_values,
+        semantic_name: c.semantic_name,
       }));
       await insertInChunks(supabase, 'dataset_columns', columnRows, 500);
 

@@ -327,3 +327,74 @@ export function runTableQuery(rows: DatasetRow[], spec: TableQuerySpec): TableQu
   };
 }
 
+
+// =====================================================
+// Period comparison (compare_periods tool)
+// =====================================================
+
+export interface ComparePeriodsSpec {
+  date_field: string;
+  metric: TableQueryMetric;
+  period_a: { from: string; to: string; label?: string };
+  period_b: { from: string; to: string; label?: string };
+  filters?: TableQueryFilter[];
+}
+
+export interface ComparePeriodsResult {
+  metric: string;
+  period_a: { label: string; from: string; to: string; value: number | null; matched_rows: number };
+  period_b: { label: string; from: string; to: string; value: number | null; matched_rows: number };
+  delta: number | null;
+  pct_change: number | null;
+  evidence: { period_a_row_ids: string[]; period_b_row_ids: string[] };
+}
+
+/** Compute one metric over two date ranges and report the change. */
+export function comparePeriods(rows: DatasetRow[], spec: ComparePeriodsSpec): ComparePeriodsResult {
+  const runFor = (period: { from: string; to: string }) =>
+    runTableQuery(rows, {
+      filters: [
+        ...(spec.filters ?? []),
+        { field: spec.date_field, op: 'between', min: period.from, max: period.to },
+      ],
+      metrics: [spec.metric],
+      evidence_limit: 25,
+    });
+
+  const a = runFor(spec.period_a);
+  const b = runFor(spec.period_b);
+
+  const valueOf = (result: TableQueryResult): number | null => {
+    const raw = result.rows[0]?.[spec.metric.as];
+    return typeof raw === 'number' && Number.isFinite(raw) ? raw : null;
+  };
+
+  const va = valueOf(a);
+  const vb = valueOf(b);
+  const delta = va != null && vb != null ? va - vb : null;
+  const pct = delta != null && vb !== null && vb !== 0 ? (delta / Math.abs(vb)) * 100 : null;
+
+  return {
+    metric: spec.metric.as,
+    period_a: {
+      label: spec.period_a.label ?? 'period_a',
+      from: spec.period_a.from,
+      to: spec.period_a.to,
+      value: va,
+      matched_rows: a.stats.matched_rows,
+    },
+    period_b: {
+      label: spec.period_b.label ?? 'period_b',
+      from: spec.period_b.from,
+      to: spec.period_b.to,
+      value: vb,
+      matched_rows: b.stats.matched_rows,
+    },
+    delta,
+    pct_change: pct != null ? Math.round(pct * 100) / 100 : null,
+    evidence: {
+      period_a_row_ids: a.evidence.used_row_ids,
+      period_b_row_ids: b.evidence.used_row_ids,
+    },
+  };
+}

@@ -9,6 +9,7 @@ export interface ParsedDatasetTable {
     normalized_name: string;
     data_type: InferredColumnType;
     sample_values: string[];
+    semantic_name: string | null;
   }>;
   rows: Array<{
     row_index: number;
@@ -109,6 +110,40 @@ function coerceCellValue(value: unknown): unknown {
   if (asDate !== null) return asDate;
 
   return trimmed;
+}
+
+/**
+ * Heuristic semantic mapping: guess the business meaning of a column from its
+ * name and type. Users can refine via PATCH /api/datasets/columns; the AI
+ * router uses semantic names to pick the right columns for metrics.
+ */
+export function guessSemanticName(
+  normalizedName: string,
+  dataType: InferredColumnType
+): string | null {
+  const n = normalizedName;
+
+  if (/(^|_)(amount|betrag|price|preis|total|cost|kosten|revenue|umsatz|sum|value|wert)($|_)/.test(n) && dataType === 'number') {
+    return 'amount';
+  }
+  if (/(^|_)(qty|quantity|menge|count|anzahl|units)($|_)/.test(n) && dataType === 'number') {
+    return 'quantity';
+  }
+  if (dataType === 'date' || /(^|_)(date|datum|_at|day)($|_)/.test(n)) return 'date';
+  if (/(^|_)(month|monat|period|quarter|year|jahr)($|_)/.test(n)) return 'period';
+  if (/(^|_)(status|state|zustand)($|_)/.test(n)) return 'status';
+  if (/(_id|_nr|_no|_number)$|^(id|nr|no)$|(^|_)(invoice_number|order_number|rechnungsnummer)($|_)/.test(n)) {
+    return 'identifier';
+  }
+  if (/(^|_)(currency|währung|waehrung)($|_)/.test(n)) return 'currency';
+  if (/(^|_)(email|e_mail)($|_)/.test(n)) return 'email';
+  if (/(^|_)(customer|kunde|client|supplier|lieferant|vendor|employee|mitarbeiter|project|projekt|product|produkt|name|title)($|_)/.test(n)) {
+    return 'entity';
+  }
+  if (/(^|_)(category|kategorie|type|typ|trade|gewerk|department|abteilung|group)($|_)/.test(n)) {
+    return 'dimension';
+  }
+  return null;
 }
 
 function inferColumnType(values: unknown[]): InferredColumnType {
@@ -217,6 +252,7 @@ export function parseWorkbookToDatasetTables(params: {
         normalized_name: normalized,
         data_type: dataType,
         sample_values: sampleValues,
+        semantic_name: guessSemanticName(normalized, dataType),
       };
     });
 

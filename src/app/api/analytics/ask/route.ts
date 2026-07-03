@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { requireOrgContext, audit, authErrorResponse } from '@/lib/auth';
 import { openai } from '@/lib/openai';
-import { runTableQuery, TableQuerySpec } from '@/lib/analytics';
+import { runTableQuery, comparePeriods, TableQuerySpec, ComparePeriodsSpec } from '@/lib/analytics';
 import { AnalyticsAskRequest } from '@/types';
 
 export const runtime = 'nodejs';
@@ -141,6 +141,67 @@ export async function POST(req: NextRequest) {
           },
         },
       },
+      {
+        type: 'function' as const,
+        function: {
+          name: 'compare_periods',
+          description:
+            'Compare one metric across two date ranges (e.g. this month vs last month). Returns both values, the delta, percent change, and row-level evidence.',
+          parameters: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+              date_field: { type: 'string', description: 'Date column field name' },
+              metric: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  op: { type: 'string', enum: ['count', 'sum', 'avg', 'min', 'max'] },
+                  field: { type: 'string' },
+                  as: { type: 'string' },
+                },
+                required: ['op', 'as'],
+              },
+              period_a: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  from: { type: 'string' }, to: { type: 'string' }, label: { type: 'string' },
+                },
+                required: ['from', 'to'],
+              },
+              period_b: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  from: { type: 'string' }, to: { type: 'string' }, label: { type: 'string' },
+                },
+                required: ['from', 'to'],
+              },
+              filters: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    field: { type: 'string' },
+                    op: {
+                      type: 'string',
+                      enum: ['eq', 'ne', 'lt', 'lte', 'gt', 'gte', 'in', 'contains', 'between', 'is_null', 'not_null'],
+                    },
+                    value: {},
+                    values: { type: 'array', items: {} },
+                    min: {},
+                    max: {},
+                  },
+                  required: ['field', 'op'],
+                },
+              },
+            },
+            required: ['date_field', 'metric', 'period_a', 'period_b'],
+          },
+        },
+      },
     ];
 
     const system = [
@@ -203,7 +264,7 @@ export async function POST(req: NextRequest) {
       messages.push(msg);
 
       for (const call of msg.tool_calls) {
-        if (call.type !== 'function' || call.function.name !== 'table_query') continue;
+        if (call.type !== 'function') continue;
         let args: any = {};
         try {
           args = call.function.arguments ? JSON.parse(call.function.arguments) : {};
@@ -211,8 +272,16 @@ export async function POST(req: NextRequest) {
           args = {};
         }
 
-        const output = executeTableQuery(args);
-        toolResults.push({ tool: 'table_query', input: args, output });
+        let output: Record<string, any>;
+        if (call.function.name === 'table_query') {
+          output = executeTableQuery(args);
+        } else if (call.function.name === 'compare_periods') {
+          output = comparePeriods(rows, args as ComparePeriodsSpec);
+        } else {
+          output = { error: `Unknown tool: ${call.function.name}` };
+        }
+
+        toolResults.push({ tool: call.function.name, input: args, output });
         messages.push({
           role: 'tool',
           tool_call_id: call.id,
