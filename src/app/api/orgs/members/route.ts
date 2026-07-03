@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireOrgContext, audit, authErrorResponse, OrgRole } from '@/lib/auth';
+import { requireOrgContext, audit, authErrorResponse, roleHasPermission, OrgRole } from '@/lib/auth';
 
 const ASSIGNABLE_ROLES: OrgRole[] = ['admin', 'manager', 'analyst', 'editor', 'viewer', 'guest'];
 
@@ -12,26 +12,30 @@ function fail(error: unknown, fallback: string) {
   return NextResponse.json({ data: null, error: fallback }, { status: 500 });
 }
 
-// GET /api/orgs/members - members + pending invites
+// GET /api/orgs/members - members (any member, e.g. for assignee pickers);
+// pending invites included only for admins/owners
 export async function GET() {
   try {
-    const ctx = await requireOrgContext('manage_members');
+    const ctx = await requireOrgContext();
 
-    const [{ data: members, error: mErr }, { data: invites, error: iErr }] = await Promise.all([
-      ctx.supabase
-        .from('organization_members')
-        .select('id, role, created_at, profiles(id, email, full_name)')
-        .eq('organization_id', ctx.org.id)
-        .order('created_at'),
-      ctx.supabase
+    const { data: members, error: mErr } = await ctx.supabase
+      .from('organization_members')
+      .select('id, role, created_at, profiles(id, email, full_name)')
+      .eq('organization_id', ctx.org.id)
+      .order('created_at');
+    if (mErr) throw mErr;
+
+    let invites: unknown[] = [];
+    if (roleHasPermission(ctx.role, 'manage_members')) {
+      const { data, error: iErr } = await ctx.supabase
         .from('organization_invites')
         .select('id, email, role, created_at, expires_at')
         .eq('organization_id', ctx.org.id)
         .is('accepted_at', null)
-        .order('created_at'),
-    ]);
-    if (mErr) throw mErr;
-    if (iErr) throw iErr;
+        .order('created_at');
+      if (iErr) throw iErr;
+      invites = data ?? [];
+    }
 
     return NextResponse.json({ data: { members, invites }, error: null });
   } catch (error) {
