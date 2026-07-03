@@ -6,6 +6,32 @@ import { getProvider } from '@/lib/ai/provider';
 import { detectIntent, needsStructuredData, Intent } from '@/lib/ai/router';
 import { buildContext, SYSTEM_INSTRUCTIONS } from '@/lib/ai/context-builder';
 import { runTableQuery, comparePeriods, DatasetRow } from '@/lib/analytics';
+import { computeMetric, MetricDefinition } from '@/lib/metrics/compute';
+import { forecastSeries } from '@/lib/forecasting/forecast';
+import { enforceRateLimit } from '@/lib/rate-limit';
+
+/**
+ * Numeric-provenance guard: flag answers containing sizeable numbers that
+ * do not appear anywhere in the tool outputs they should derive from.
+ */
+function verifyNumericProvenance(answer: string, toolResults: ToolResult[]): string | null {
+  if (toolResults.length === 0) return null;
+  const toolText = JSON.stringify(toolResults.map((t) => t.output));
+  const numbers = answer.match(/\d[\d,.]{2,}/g) ?? [];
+  const unverified = numbers.filter((raw) => {
+    const cleaned = raw.replace(/[.,]$/, '');
+    const canonical = cleaned.replace(/,/g, '');
+    if (toolText.includes(cleaned) || toolText.includes(canonical)) return false;
+    // Rounded figures: check integer part
+    const intPart = canonical.split('.')[0];
+    if (intPart.length >= 3 && toolText.includes(intPart)) return false;
+    // Years and dates are not computed figures
+    if (/^(19|20)\d{2}$/.test(canonical)) return false;
+    return true;
+  });
+  if (unverified.length === 0) return null;
+  return `Provenance check: ${unverified.length} number(s) in this answer (${unverified.slice(0, 3).join(', ')}${unverified.length > 3 ? ', …' : ''}) could not be matched to a tool computation — verify before relying on them.`;
+}
 
 export const runtime = 'nodejs';
 export const maxDuration = 120;
@@ -72,6 +98,8 @@ export async function POST(req: NextRequest) {
     const ctx = await requireOrgContext('run_ai');
     const body = await req.json();
 
+    enforceRateLimit('ai', ctx.user.id);
+
     const question: string = typeof body.question === 'string' ? body.question.trim() : '';
     if (!question) {
       return NextResponse.json({ data: null, error: 'question is required' }, { status: 400 });
@@ -119,7 +147,8 @@ export async function POST(req: NextRequest) {
     const toolResults: ToolResult[] = [];
     let answer = '';
 
-    const useDataTools = needsStructuredData(intent) && built.datasetSchemas.length > 0;
+    const useDataTools =
+      needsStructuredData(intent) && (built.datasetSchemas.length > 0 || built.metrics.length > 0);
 
     if (useDataTools) {
       // Tool loop: the LLM plans, our engine computes. Rows loaded per table on demand.
@@ -188,6 +217,45 @@ export async function POST(req: NextRequest) {
             },
           },
         },
+        {
+          type: 'function' as const,
+          function: {
+            name: 'compute_metric',
+            description:
+              'Compute a metric from the metric catalog by its id. The catalog definition decides table, column, filters, and aggregation — prefer this over query_table when a catalog metric matches the question. mode "series" returns a time series with anomaly flags.',
+            parameters: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                metric_id: { type: 'string' },
+                mode: { type: 'string', enum: ['value', 'series'] },
+                period: {
+                  type: 'object', additionalProperties: false,
+                  properties: { from: { type: 'string' }, to: { type: 'string' } },
+                  required: ['from', 'to'],
+                },
+              },
+              required: ['metric_id'],
+            },
+          },
+        },
+        {
+          type: 'function' as const,
+          function: {
+            name: 'forecast_metric',
+            description:
+              'Forecast a catalog metric N periods ahead. Refuses when history is too short. Returns projections with 95% intervals and explicit assumptions — always present these as projections, separate from facts.',
+            parameters: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                metric_id: { type: 'string' },
+                horizon: { type: 'integer', minimum: 1, maximum: 12 },
+              },
+              required: ['metric_id'],
+            },
+          },
+        },
       ];
 
       const messages: any[] = [
@@ -224,7 +292,34 @@ export async function POST(req: NextRequest) {
 
           let output: Record<string, any>;
           try {
-            if (!validTableIds.has(args.table_id)) {
+            if (call.function.name === 'compute_metric' || call.function.name === 'forecast_metric') {
+              const { data: metricRow } = await ctx.supabase
+                .from('metrics')
+                .select('*')
+                .eq('id', args.metric_id)
+                .eq('organization_id', ctx.org.id)
+                .maybeSingle();
+              if (!metricRow) {
+                output = { error: 'Unknown metric_id — use ids from the Metric Catalog in context.' };
+              } else if (call.function.name === 'compute_metric') {
+                output = await computeMetric(ctx.supabase, ctx.org.id, metricRow as MetricDefinition, {
+                  mode: args.mode === 'series' ? 'series' : 'value',
+                  period: args.period?.from && args.period?.to ? args.period : undefined,
+                });
+              } else {
+                const computation = await computeMetric(ctx.supabase, ctx.org.id, metricRow as MetricDefinition, {
+                  mode: 'series',
+                });
+                const history = computation.series
+                  .filter((p) => p.value != null)
+                  .map((p) => ({ period: p.period, value: p.value as number }));
+                output = {
+                  metric: metricRow.name,
+                  ...forecastSeries(history, Math.max(1, Math.min(args.horizon ?? 3, 12))),
+                  history_used: history,
+                };
+              }
+            } else if (!validTableIds.has(args.table_id)) {
               output = { error: `Unknown table_id. Use one of: ${Array.from(validTableIds).join(', ')}` };
             } else if (call.function.name === 'query_table') {
               const rows = await loadRows(args.table_id);
@@ -247,6 +342,11 @@ export async function POST(req: NextRequest) {
       if (!answer) {
         answer =
           'I could not complete the analysis within the tool budget. Try narrowing the question (specific metric, table, and date range).';
+      }
+
+      const provenanceWarning = verifyNumericProvenance(answer, toolResults);
+      if (provenanceWarning) {
+        built.envelope.missing_data.push(provenanceWarning);
       }
     } else {
       // Definitional / search / workflow answers: grounded synthesis, no invented numbers
