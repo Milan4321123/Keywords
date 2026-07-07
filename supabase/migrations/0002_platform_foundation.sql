@@ -38,6 +38,17 @@ do $$ begin
   create type task_priority as enum ('low', 'medium', 'high', 'urgent');
 exception when duplicate_object then null; end $$;
 
+-- relation_type is created by schema.sql. This migration only ALTERs it, so
+-- guard against schema.sql not having run yet (or the type having been
+-- dropped) by creating it here with the original v1 values if missing.
+do $$ begin
+  create type relation_type as enum (
+    'is-a', 'part-of', 'requires', 'causes', 'leads-to', 'owned-by',
+    'depends-on', 'related-to', 'approves', 'contains', 'triggers',
+    'blocks', 'succeeds', 'precedes'
+  );
+exception when duplicate_object then null; end $$;
+
 -- Extend relation types to the full spec vocabulary (hyphen style, v1 convention)
 alter type relation_type add value if not exists 'produces';
 alter type relation_type add value if not exists 'affects';
