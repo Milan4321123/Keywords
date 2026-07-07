@@ -88,12 +88,11 @@ The full product design (architecture, schema, AI routing, security model, miles
 
 2. **Set up Supabase**
    - Create a new Supabase project
-   - Run the SQL schema from `supabase/schema.sql`
-   - Then run `supabase/migrations/0002_platform_foundation.sql` (multi-tenancy, roles, audit, versioning — safe on both fresh and existing databases; pre-existing data is moved into a "Default Organization" that the first user to create an organization claims automatically)
-   - Enable the `pgvector` extension
-   - Create a storage bucket named `assets`
+   - In the SQL Editor, run **`supabase/setup_complete.sql`** — one idempotent file containing the base schema + all migrations (0002–0006). It is safe to run on a fresh project *or* re-run on a partial/existing one, so if an earlier run failed halfway you can just paste it again.
+   - Enable the `pgvector` extension (the script enables it, but confirm under Database → Extensions)
+   - Create a storage bucket named `assets` (set it Private — the app serves files via signed URLs)
    - Enable email/password auth under Authentication → Providers
-   - If you created your project before analytics existed, run `supabase/analytics.sql` too
+   - Optional: run `supabase/seed.sql` for demo construction data. `schema.sql` + `migrations/*` are also available individually if you prefer to run them step by step.
 
 3. **Configure environment**
    ```bash

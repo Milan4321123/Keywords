@@ -8,7 +8,7 @@ create extension if not exists vector;
 -- =====================================================
 -- KEYWORDS TABLE (Ontology Nodes)
 -- =====================================================
-create table keywords (
+create table if not exists keywords (
   id uuid primary key default gen_random_uuid(),
   parent_id uuid references keywords(id) on delete cascade,
   title text not null,
@@ -30,13 +30,14 @@ create table keywords (
 );
 
 -- Index for parent-child queries
-create index idx_keywords_parent on keywords(parent_id);
-create index idx_keywords_slug on keywords(slug);
+create index if not exists idx_keywords_parent on keywords(parent_id);
+create index if not exists idx_keywords_slug on keywords(slug);
 
 -- =====================================================
 -- KEYWORD RELATIONS TABLE (Edges in the Knowledge Graph)
 -- =====================================================
-create type relation_type as enum (
+do $$ begin
+  create type relation_type as enum (
   'is-a',           -- Invoice is-a Document
   'part-of',        -- Trade is part-of Project
   'requires',       -- Invoice requires Approval
@@ -52,8 +53,9 @@ create type relation_type as enum (
   'succeeds',       -- Phase succeeds Phase
   'precedes'        -- Phase precedes Phase
 );
+exception when duplicate_object then null; end $$;
 
-create table keyword_relations (
+create table if not exists keyword_relations (
   id uuid primary key default gen_random_uuid(),
   from_keyword_id uuid not null references keywords(id) on delete cascade,
   relation_type relation_type not null,
@@ -68,14 +70,15 @@ create table keyword_relations (
   check (from_keyword_id <> to_keyword_id)
 );
 
-create index idx_relations_from on keyword_relations(from_keyword_id);
-create index idx_relations_to on keyword_relations(to_keyword_id);
-create index idx_relations_type on keyword_relations(relation_type);
+create index if not exists idx_relations_from on keyword_relations(from_keyword_id);
+create index if not exists idx_relations_to on keyword_relations(to_keyword_id);
+create index if not exists idx_relations_type on keyword_relations(relation_type);
 
 -- =====================================================
 -- ASSETS TABLE (Uploaded Files/Evidence)
 -- =====================================================
-create type asset_type as enum (
+do $$ begin
+  create type asset_type as enum (
   'pdf',
   'image',
   'excel',
@@ -85,8 +88,9 @@ create type asset_type as enum (
   'video',
   'other'
 );
+exception when duplicate_object then null; end $$;
 
-create table assets (
+create table if not exists assets (
   id uuid primary key default gen_random_uuid(),
   file_name text not null,
   file_url text not null,
@@ -102,8 +106,8 @@ create table assets (
   updated_at timestamptz default now()
 );
 
-create index idx_assets_type on assets(file_type);
-create index idx_assets_processed on assets(processed);
+create index if not exists idx_assets_type on assets(file_type);
+create index if not exists idx_assets_processed on assets(processed);
 
 -- Optional scoping helpers (e.g. org_id stored in meta_json)
 create index if not exists idx_assets_org_id on assets ((meta_json->>'org_id'));
@@ -111,7 +115,7 @@ create index if not exists idx_assets_org_id on assets ((meta_json->>'org_id'));
 -- =====================================================
 -- KEYWORD_ASSETS TABLE (Many-to-Many Link)
 -- =====================================================
-create table keyword_assets (
+create table if not exists keyword_assets (
   id uuid primary key default gen_random_uuid(),
   keyword_id uuid not null references keywords(id) on delete cascade,
   asset_id uuid not null references assets(id) on delete cascade,
@@ -122,13 +126,13 @@ create table keyword_assets (
   unique(keyword_id, asset_id)
 );
 
-create index idx_ka_keyword on keyword_assets(keyword_id);
-create index idx_ka_asset on keyword_assets(asset_id);
+create index if not exists idx_ka_keyword on keyword_assets(keyword_id);
+create index if not exists idx_ka_asset on keyword_assets(asset_id);
 
 -- =====================================================
 -- CHUNKS TABLE (For RAG - Document Chunks with Embeddings)
 -- =====================================================
-create table chunks (
+create table if not exists chunks (
   id uuid primary key default gen_random_uuid(),
   asset_id uuid references assets(id) on delete cascade,
   keyword_id uuid references keywords(id) on delete set null, -- optional direct keyword link
@@ -142,9 +146,9 @@ create table chunks (
   unique(asset_id, chunk_index)
 );
 
-create index idx_chunks_asset on chunks(asset_id);
-create index idx_chunks_keyword on chunks(keyword_id);
-create index idx_chunks_asset_chunk_index on chunks(asset_id, chunk_index);
+create index if not exists idx_chunks_asset on chunks(asset_id);
+create index if not exists idx_chunks_keyword on chunks(keyword_id);
+create index if not exists idx_chunks_asset_chunk_index on chunks(asset_id, chunk_index);
 
 -- Full-text search support (hybrid retrieval)
 alter table chunks
@@ -154,14 +158,14 @@ alter table chunks
 create index if not exists idx_chunks_search_vector on chunks using gin (search_vector);
 
 -- Create a vector index for similarity search
-create index idx_chunks_embedding on chunks 
+create index if not exists idx_chunks_embedding on chunks 
   using ivfflat (embedding vector_cosine_ops)
   with (lists = 100);
 
 -- =====================================================
 -- VOICE RECORDINGS TABLE (Optional - Store Original Audio)
 -- =====================================================
-create table voice_recordings (
+create table if not exists voice_recordings (
   id uuid primary key default gen_random_uuid(),
   keyword_id uuid references keywords(id) on delete cascade,
   audio_url text not null,
@@ -172,12 +176,12 @@ create table voice_recordings (
   created_at timestamptz default now()
 );
 
-create index idx_voice_keyword on voice_recordings(keyword_id);
+create index if not exists idx_voice_keyword on voice_recordings(keyword_id);
 
 -- =====================================================
 -- CHAT HISTORY TABLE (For Context in Conversations)
 -- =====================================================
-create table chat_sessions (
+create table if not exists chat_sessions (
   id uuid primary key default gen_random_uuid(),
   title text,
   context_keywords uuid[], -- keywords used as context
@@ -186,7 +190,7 @@ create table chat_sessions (
   updated_at timestamptz default now()
 );
 
-create table chat_messages (
+create table if not exists chat_messages (
   id uuid primary key default gen_random_uuid(),
   session_id uuid references chat_sessions(id) on delete cascade,
   role text not null check (role in ('user', 'assistant', 'system')),
@@ -196,7 +200,7 @@ create table chat_messages (
   created_at timestamptz default now()
 );
 
-create index idx_chat_messages_session on chat_messages(session_id);
+create index if not exists idx_chat_messages_session on chat_messages(session_id);
 
 -- =====================================================
 -- FUNCTIONS
@@ -402,14 +406,17 @@ begin
 end;
 $$ language plpgsql;
 
+drop trigger if exists keywords_updated_at on keywords;
 create trigger keywords_updated_at
   before update on keywords
   for each row execute function update_updated_at();
 
+drop trigger if exists assets_updated_at on assets;
 create trigger assets_updated_at
   before update on assets
   for each row execute function update_updated_at();
 
+drop trigger if exists chat_sessions_updated_at on chat_sessions;
 create trigger chat_sessions_updated_at
   before update on chat_sessions
   for each row execute function update_updated_at();
@@ -418,7 +425,7 @@ create trigger chat_sessions_updated_at
 -- DATASETS (Structured uploads for grounded analytics)
 -- =====================================================
 
-create table datasets (
+create table if not exists datasets (
   id uuid primary key default gen_random_uuid(),
   asset_id uuid references assets(id) on delete set null,
   title text not null,
@@ -427,9 +434,9 @@ create table datasets (
   created_at timestamptz default now()
 );
 
-create index idx_datasets_asset on datasets(asset_id);
+create index if not exists idx_datasets_asset on datasets(asset_id);
 
-create table dataset_tables (
+create table if not exists dataset_tables (
   id uuid primary key default gen_random_uuid(),
   dataset_id uuid not null references datasets(id) on delete cascade,
   name text not null,
@@ -440,11 +447,13 @@ create table dataset_tables (
   unique(dataset_id, name)
 );
 
-create index idx_dataset_tables_dataset on dataset_tables(dataset_id);
+create index if not exists idx_dataset_tables_dataset on dataset_tables(dataset_id);
 
-create type dataset_column_type as enum ('text', 'number', 'date', 'boolean', 'json');
+do $$ begin
+  create type dataset_column_type as enum ('text', 'number', 'date', 'boolean', 'json');
+exception when duplicate_object then null; end $$;
 
-create table dataset_columns (
+create table if not exists dataset_columns (
   id uuid primary key default gen_random_uuid(),
   dataset_table_id uuid not null references dataset_tables(id) on delete cascade,
   name text not null,
@@ -455,9 +464,9 @@ create table dataset_columns (
   unique(dataset_table_id, normalized_name)
 );
 
-create index idx_dataset_columns_table on dataset_columns(dataset_table_id);
+create index if not exists idx_dataset_columns_table on dataset_columns(dataset_table_id);
 
-create table dataset_rows (
+create table if not exists dataset_rows (
   id uuid primary key default gen_random_uuid(),
   dataset_table_id uuid not null references dataset_tables(id) on delete cascade,
   row_index integer not null,
@@ -467,8 +476,8 @@ create table dataset_rows (
   unique(dataset_table_id, row_index)
 );
 
-create index idx_dataset_rows_table on dataset_rows(dataset_table_id);
-create index idx_dataset_rows_data_gin on dataset_rows using gin (data jsonb_path_ops);
+create index if not exists idx_dataset_rows_table on dataset_rows(dataset_table_id);
+create index if not exists idx_dataset_rows_data_gin on dataset_rows using gin (data jsonb_path_ops);
 
 -- =====================================================
 -- ROW LEVEL SECURITY (Optional - Enable as needed)
@@ -480,41 +489,3 @@ create index idx_dataset_rows_data_gin on dataset_rows using gin (data jsonb_pat
 -- alter table assets enable row level security;
 -- alter table keyword_assets enable row level security;
 -- alter table chunks enable row level security;
-
--- =====================================================
--- SAMPLE DATA FOR TESTING
--- =====================================================
-
--- Insert root keywords for a construction/property management domain
-insert into keywords (id, title, slug, definition, explanation) values
-  ('00000000-0000-0000-0000-000000000001', 'Projects', 'projects', 
-   'Construction or renovation projects', 
-   'A project is a defined scope of construction work with a start date, end date, budget, and assigned team.'),
-  ('00000000-0000-0000-0000-000000000002', 'Documents', 'documents', 
-   'All business documents and paperwork', 
-   'Documents include invoices, contracts, permits, reports, and any official paperwork related to operations.'),
-  ('00000000-0000-0000-0000-000000000003', 'Roles', 'roles', 
-   'People and their responsibilities', 
-   'Roles define who does what in the organization - from project managers to site workers.'),
-  ('00000000-0000-0000-0000-000000000004', 'Properties', 'properties', 
-   'Real estate and rental units', 
-   'Properties include buildings, apartments, commercial spaces that we own or manage.');
-
--- Insert sub-keywords
-insert into keywords (parent_id, title, slug, definition) values
-  ('00000000-0000-0000-0000-000000000002', 'Invoice', 'invoice', 
-   'A billing document from a supplier requesting payment for goods or services'),
-  ('00000000-0000-0000-0000-000000000002', 'Contract', 'contract', 
-   'A legal agreement between parties defining terms, scope, and obligations'),
-  ('00000000-0000-0000-0000-000000000002', 'Approval', 'approval', 
-   'Authorization required before proceeding with an action or payment'),
-  ('00000000-0000-0000-0000-000000000001', 'Trade', 'trade', 
-   'A specific craft or discipline within construction (e.g., electrical, plumbing)'),
-  ('00000000-0000-0000-0000-000000000001', 'Defect', 'defect', 
-   'A flaw or issue in construction work that needs correction'),
-  ('00000000-0000-0000-0000-000000000003', 'Bauleiter', 'bauleiter', 
-   'Site manager responsible for overseeing construction progress'),
-  ('00000000-0000-0000-0000-000000000004', 'Tenant', 'tenant', 
-   'A person or business renting a property'),
-  ('00000000-0000-0000-0000-000000000004', 'Unit', 'unit', 
-   'An individual apartment or space within a building');
