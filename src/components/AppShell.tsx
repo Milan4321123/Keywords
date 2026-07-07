@@ -20,6 +20,7 @@ import {
   Plus,
   Menu,
   X,
+  HardHat,
 } from 'lucide-react';
 import { createBrowserSupabase } from '@/lib/supabase/client';
 
@@ -35,11 +36,17 @@ interface AppShellProps {
   activeOrgId: string;
   userEmail: string;
   canManage: boolean;
+  /** Simplified on-site worker: minimal navigation. */
+  isWorker: boolean;
   children: React.ReactNode;
 }
 
+const WORK_ITEM = { href: '/work', label: 'Arbeitsansicht · Work', icon: HardHat };
+
+// Full navigation for editors, managers, and admins
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  WORK_ITEM,
   { href: '/keywords', label: 'Keyword Map', icon: FolderTree },
   { href: '/graph', label: 'Graph View', icon: Waypoints },
   { href: '/data', label: 'Data Hub', icon: Database },
@@ -49,12 +56,19 @@ const NAV_ITEMS = [
   { href: '/tasks', label: 'Tasks', icon: ListChecks },
 ];
 
+// Stripped-down navigation for on-site workers
+const WORKER_NAV_ITEMS = [
+  WORK_ITEM,
+  { href: '/chat', label: 'AI Chat', icon: MessageSquare },
+];
+
 const ADMIN_ITEMS = [
   { href: '/admin', label: 'Admin Settings', icon: Settings },
   { href: '/admin/audit', label: 'Audit Log', icon: ScrollText },
 ];
 
-export default function AppShell({ orgs, activeOrgId, userEmail, canManage, children }: AppShellProps) {
+export default function AppShell({ orgs, activeOrgId, userEmail, canManage, isWorker, children }: AppShellProps) {
+  const navItems = isWorker ? WORKER_NAV_ITEMS : NAV_ITEMS;
   const pathname = usePathname();
   const router = useRouter();
   const [orgMenuOpen, setOrgMenuOpen] = useState(false);
@@ -128,7 +142,7 @@ export default function AppShell({ orgs, activeOrgId, userEmail, canManage, chil
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto p-3 space-y-0.5">
-        {NAV_ITEMS.map((item) => (
+        {navItems.map((item) => (
           <Link
             key={item.href}
             href={item.href}
@@ -144,7 +158,7 @@ export default function AppShell({ orgs, activeOrgId, userEmail, canManage, chil
           </Link>
         ))}
 
-        {canManage && (
+        {!isWorker && canManage && (
           <>
             <div className="pt-4 pb-1 px-3 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
               Administration

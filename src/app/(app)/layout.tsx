@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { cookies } from 'next/headers';
 import { createAuthClient, createServiceClient } from '@/lib/supabase/server';
-import { claimPendingInvites, getMemberships, roleHasPermission, ACTIVE_ORG_COOKIE, OrgRole } from '@/lib/auth';
+import { claimPendingInvites, getMemberships, roleHasPermission, isWorkerRole, ACTIVE_ORG_COOKIE, OrgRole } from '@/lib/auth';
 import AppShell, { ShellOrg } from '@/components/AppShell';
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -39,6 +39,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       activeOrgId={active.organization_id}
       userEmail={user.email}
       canManage={roleHasPermission(active.role as OrgRole, 'manage_members')}
+      isWorker={isWorkerRole(active.role as OrgRole)}
     >
       {children}
     </AppShell>

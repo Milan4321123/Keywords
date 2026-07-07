@@ -9,13 +9,16 @@ import {
   Activity,
   ArrowRight,
 } from 'lucide-react';
-import { getOrgContextForPage } from '@/lib/auth';
+import { getOrgContextForPage, isWorkerRole } from '@/lib/auth';
 
 export const dynamic = 'force-dynamic';
 
 export default async function DashboardPage() {
   const ctx = await getOrgContextForPage();
   if (!ctx) redirect('/login');
+
+  // On-site workers get the simplified Work view instead of the analytics dashboard
+  if (isWorkerRole(ctx.role)) redirect('/work');
 
   const { supabase, org } = ctx;
 

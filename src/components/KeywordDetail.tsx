@@ -1,43 +1,50 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Save,
   Trash2,
   Plus,
   X,
-  Languages,
   BookOpen,
-  ListChecks,
   Sparkles,
   Loader2,
-  Check
+  Check,
+  ChevronDown,
+  Globe,
 } from 'lucide-react';
-import { Keyword, KeywordType, KeywordStatus, RelationType } from '@/types';
+import { Keyword, KeywordType, KeywordStatus, KeywordAccessLevel } from '@/types';
 import VoiceInput from './VoiceInput';
+import ChipInput from './ChipInput';
 
 const KEYWORD_TYPE_OPTIONS: { value: KeywordType; label: string }[] = [
-  { value: 'concept', label: 'Concept' },
-  { value: 'process', label: 'Process' },
-  { value: 'metric', label: 'Metric' },
-  { value: 'dataset', label: 'Dataset' },
-  { value: 'document_type', label: 'Document Type' },
-  { value: 'role', label: 'Role' },
-  { value: 'task_type', label: 'Task Type' },
-  { value: 'workflow_step', label: 'Workflow Step' },
-  { value: 'department', label: 'Department' },
-  { value: 'entity', label: 'Entity' },
+  { value: 'concept', label: 'Konzept · Concept' },
+  { value: 'process', label: 'Prozess · Process' },
+  { value: 'metric', label: 'Kennzahl · Metric' },
+  { value: 'dataset', label: 'Datensatz · Dataset' },
+  { value: 'document_type', label: 'Dokumenttyp · Document Type' },
+  { value: 'role', label: 'Rolle · Role' },
+  { value: 'task_type', label: 'Aufgabentyp · Task Type' },
+  { value: 'workflow_step', label: 'Workflow-Schritt · Workflow Step' },
+  { value: 'department', label: 'Abteilung · Department' },
+  { value: 'entity', label: 'Entität · Entity' },
   { value: 'kpi', label: 'KPI' },
-  { value: 'report_type', label: 'Report Type' },
-  { value: 'risk', label: 'Risk' },
-  { value: 'rule', label: 'Rule' },
-  { value: 'skill', label: 'Skill' },
+  { value: 'report_type', label: 'Berichtstyp · Report Type' },
+  { value: 'risk', label: 'Risiko · Risk' },
+  { value: 'rule', label: 'Regel · Rule' },
+  { value: 'skill', label: 'Fähigkeit · Skill' },
 ];
 
 const KEYWORD_STATUS_OPTIONS: { value: KeywordStatus; label: string }[] = [
-  { value: 'draft', label: 'Draft' },
-  { value: 'active', label: 'Active' },
-  { value: 'archived', label: 'Archived' },
+  { value: 'draft', label: 'Entwurf · Draft' },
+  { value: 'active', label: 'Aktiv · Active' },
+  { value: 'archived', label: 'Archiviert · Archived' },
+];
+
+const ACCESS_LEVEL_OPTIONS: { value: KeywordAccessLevel; label: string; hint: string }[] = [
+  { value: 'worker', label: 'Arbeiter · Worker', hint: 'Für alle sichtbar · Everyone can see' },
+  { value: 'manager', label: 'Bauleiter · Manager', hint: 'Bauleiter & Admin' },
+  { value: 'admin', label: 'Admin', hint: 'Nur Admin · Admin only' },
 ];
 
 interface DefinitionSuggestion {
@@ -56,18 +63,16 @@ interface KeywordDetailProps {
   parentId?: string | null;
 }
 
-const RELATION_TYPES: { value: RelationType; label: string; description: string }[] = [
-  { value: 'is-a', label: 'Is A', description: 'Invoice is-a Document' },
-  { value: 'part-of', label: 'Part Of', description: 'Trade is part-of Project' },
-  { value: 'requires', label: 'Requires', description: 'Invoice requires Approval' },
-  { value: 'causes', label: 'Causes', description: 'Defect causes Rework' },
-  { value: 'leads-to', label: 'Leads To', description: 'Issue leads-to Repair' },
-  { value: 'owned-by', label: 'Owned By', description: 'Project owned-by Manager' },
-  { value: 'depends-on', label: 'Depends On', description: 'Payment depends-on Approval' },
-  { value: 'related-to', label: 'Related To', description: 'Generic relation' },
-  { value: 'contains', label: 'Contains', description: 'Project contains Invoices' },
-  { value: 'approves', label: 'Approves', description: 'Manager approves Invoice' },
-];
+/** Small bilingual field label: German primary, English hint. */
+function FieldLabel({ de, en, required }: { de: string; en: string; required?: boolean }) {
+  return (
+    <label className="block mb-1.5">
+      <span className="text-sm font-bold text-slate-700">{de}</span>
+      {required && <span className="text-red-500"> *</span>}
+      <span className="text-xs font-medium text-slate-400 ml-1.5">{en}</span>
+    </label>
+  );
+}
 
 export const KeywordDetail: React.FC<KeywordDetailProps> = ({
   keyword,
@@ -89,15 +94,14 @@ export const KeywordDetail: React.FC<KeywordDetailProps> = ({
     parent_id: parentId,
   });
 
-  const [newExample, setNewExample] = useState('');
-  const [newSynonym, setNewSynonym] = useState('');
-  const [newRule, setNewRule] = useState('');
   const [newLabelLang, setNewLabelLang] = useState('');
   const [newLabelValue, setNewLabelValue] = useState('');
-  const [activeTab, setActiveTab] = useState<'basic' | 'examples' | 'relations' | 'advanced'>('basic');
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [suggestion, setSuggestion] = useState<DefinitionSuggestion | null>(null);
   const [suggesting, setSuggesting] = useState(false);
   const [suggestError, setSuggestError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const titleRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (keyword && !isNew) {
@@ -114,6 +118,7 @@ export const KeywordDetail: React.FC<KeywordDetailProps> = ({
         icon: keyword.icon || '',
         keyword_type: keyword.keyword_type || 'concept',
         status: keyword.status || 'active',
+        access_level: keyword.access_level || 'worker',
       });
     } else {
       setFormData({
@@ -125,21 +130,38 @@ export const KeywordDetail: React.FC<KeywordDetailProps> = ({
         rules: [],
         labels_json: {},
         parent_id: parentId,
+        keyword_type: 'concept',
+        status: 'active',
+        access_level: 'worker',
       });
     }
+    setShowAdvanced(false);
+    setSuggestion(null);
+    setSuggestError(null);
   }, [keyword, isNew, parentId]);
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  // Focus the title on open so the user can start typing immediately
+  useEffect(() => {
+    const timer = setTimeout(() => titleRef.current?.focus(), 120);
+    return () => clearTimeout(timer);
+  }, [isNew, keyword?.id]);
+
+  const handleSubmit = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     if (!formData.title?.trim()) {
-      alert('Please enter a title for the keyword');
+      titleRef.current?.focus();
       return;
     }
-    onSave({
-      ...formData,
-      id: isNew ? undefined : keyword?.id,
-      slug: formData.title?.toLowerCase().replace(/\s+/g, '-'),
-    });
+    setSaving(true);
+    try {
+      await onSave({
+        ...formData,
+        id: isNew ? undefined : keyword?.id,
+        slug: formData.title?.toLowerCase().replace(/\s+/g, '-'),
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const requestSuggestion = async () => {
@@ -152,7 +174,7 @@ export const KeywordDetail: React.FC<KeywordDetailProps> = ({
       if (error) throw new Error(error);
       setSuggestion(data);
     } catch (err: any) {
-      setSuggestError(err.message || 'Failed to get suggestion');
+      setSuggestError(err.message || 'Vorschlag fehlgeschlagen · Suggestion failed');
     } finally {
       setSuggesting(false);
     }
@@ -173,77 +195,17 @@ export const KeywordDetail: React.FC<KeywordDetailProps> = ({
 
   const handleVoiceTranscript = (text: string, field: 'definition' | 'explanation' | 'example') => {
     if (field === 'example') {
-      setFormData((prev) => ({
-        ...prev,
-        examples: [...(prev.examples || []), text],
-      }));
+      setFormData((prev) => ({ ...prev, examples: [...(prev.examples || []), text] }));
     } else {
-      setFormData((prev) => ({
-        ...prev,
-        [field]: text,
-      }));
+      setFormData((prev) => ({ ...prev, [field]: text }));
     }
-  };
-
-  const addExample = () => {
-    if (newExample.trim()) {
-      setFormData((prev) => ({
-        ...prev,
-        examples: [...(prev.examples || []), newExample.trim()],
-      }));
-      setNewExample('');
-    }
-  };
-
-  const removeExample = (index: number) => {
-    setFormData((prev) => ({
-      ...prev,
-      examples: prev.examples?.filter((_, i) => i !== index),
-    }));
-  };
-
-  const addSynonym = () => {
-    if (newSynonym.trim()) {
-      setFormData((prev) => ({
-        ...prev,
-        synonyms: [...(prev.synonyms || []), newSynonym.trim()],
-      }));
-      setNewSynonym('');
-    }
-  };
-
-  const removeSynonym = (index: number) => {
-    setFormData((prev) => ({
-      ...prev,
-      synonyms: prev.synonyms?.filter((_, i) => i !== index),
-    }));
-  };
-
-  const addRule = () => {
-    if (newRule.trim()) {
-      setFormData((prev) => ({
-        ...prev,
-        rules: [...(prev.rules || []), newRule.trim()],
-      }));
-      setNewRule('');
-    }
-  };
-
-  const removeRule = (index: number) => {
-    setFormData((prev) => ({
-      ...prev,
-      rules: prev.rules?.filter((_, i) => i !== index),
-    }));
   };
 
   const addLabel = () => {
     if (newLabelLang.trim() && newLabelValue.trim()) {
       setFormData((prev) => ({
         ...prev,
-        labels_json: {
-          ...prev.labels_json,
-          [newLabelLang.toLowerCase()]: newLabelValue,
-        },
+        labels_json: { ...prev.labels_json, [newLabelLang.toLowerCase()]: newLabelValue },
       }));
       setNewLabelLang('');
       setNewLabelValue('');
@@ -252,498 +214,384 @@ export const KeywordDetail: React.FC<KeywordDetailProps> = ({
 
   const removeLabel = (lang: string) => {
     setFormData((prev) => {
-      const newLabels = { ...prev.labels_json };
-      delete newLabels[lang];
-      return { ...prev, labels_json: newLabels };
+      const next = { ...prev.labels_json };
+      delete next[lang];
+      return { ...prev, labels_json: next };
     });
   };
+
+  const canSave = Boolean(formData.title?.trim());
 
   return (
     <div className="flex flex-col h-full bg-white">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100">
+      <div className="flex items-center justify-between px-6 py-5 border-b border-slate-100 shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
             {isNew ? <Plus className="w-5 h-5" /> : <BookOpen className="w-5 h-5" />}
           </div>
           <div>
             <h2 className="text-xl font-bold text-slate-800 tracking-tight">
-              {isNew ? 'New Concept' : `Edit: ${keyword?.title}`}
+              {isNew ? 'Neuer Begriff' : formData.title || keyword?.title}
+              <span className="text-sm font-medium text-slate-400 ml-2">
+                {isNew ? 'New concept' : 'Edit concept'}
+              </span>
             </h2>
             <p className="text-sm text-slate-500 font-medium">
-              {isNew ? 'Define a new concept in your ontology' : 'Update concept properties'}
+              Begriff definieren · Define a business concept
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          {!isNew && keyword && (
-            <button
-              onClick={() => onDelete(keyword.id)}
-              className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
-              title="Delete concept"
-            >
-              <Trash2 className="w-5 h-5" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex border-b border-slate-100 px-6 bg-slate-50/50">
-        {[
-          { id: 'basic', label: 'Basic Info', icon: BookOpen },
-          { id: 'examples', label: 'Examples & Rules', icon: ListChecks },
-          { id: 'advanced', label: 'Advanced', icon: Languages },
-        ].map((tab) => (
+        {!isNew && keyword && (
           <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id as any)}
-            className={`
-              flex items-center gap-2 px-5 py-4 text-sm font-semibold border-b-2 -mb-px transition-colors
-              ${activeTab === tab.id
-                ? 'border-blue-500 text-blue-600 bg-white'
-                : 'border-transparent text-slate-500 hover:text-slate-700 hover:bg-slate-100/50'
-              }
-            `}
+            onClick={() => onDelete(keyword.id)}
+            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+            title="Löschen · Delete"
           >
-            <tab.icon className="w-4 h-4" />
-            {tab.label}
+            <Trash2 className="w-5 h-5" />
           </button>
-        ))}
+        )}
       </div>
 
-      {/* Content */}
-      <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto custom-scrollbar p-6 sm:p-8">
-        {activeTab === 'basic' && (
-          <div className="space-y-8 max-w-3xl">
-            {/* Title */}
-            <div className="space-y-2">
-              <label className="block text-sm font-bold text-slate-700">
-                Concept Title <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={formData.title || ''}
-                onChange={(e) => setFormData({ ...formData, title: e.target.value })}
-                className="w-full px-4 py-3 text-lg font-medium border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-300 bg-slate-50 focus:bg-white transition-all"
-                placeholder="e.g., Invoice, Project, Defect"
-                required
-              />
-            </div>
+      {/* Form body — single scroll, no tabs */}
+      <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto custom-scrollbar">
+        <div className="p-6 sm:p-8 space-y-6 max-w-3xl">
+          {/* Title */}
+          <div>
+            <FieldLabel de="Titel" en="Title" required />
+            <input
+              ref={titleRef}
+              type="text"
+              value={formData.title || ''}
+              onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') e.preventDefault();
+              }}
+              className="w-full px-4 py-3 text-lg font-medium border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-300 bg-slate-50 focus:bg-white transition-all"
+              placeholder="z. B. Rechnung, Projekt, Mangel"
+              required
+            />
+          </div>
 
-            {/* Parent */}
-            <div className="space-y-2">
-              <label className="block text-sm font-bold text-slate-700">
-                Parent Concept
-              </label>
-              <select
-                value={formData.parent_id || ''}
-                onChange={(e) => setFormData({ ...formData, parent_id: e.target.value || null })}
-                className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-300 bg-slate-50 focus:bg-white transition-all text-slate-700"
-              >
-                <option value="">None (Root level)</option>
-                {allKeywords
-                  .filter((k) => k.id !== keyword?.id)
-                  .map((k) => (
-                    <option key={k.id} value={k.id}>
-                      {k.title}
-                    </option>
-                  ))}
-              </select>
-              <p className="text-xs text-slate-500 font-medium">Select a broader concept that this concept belongs to.</p>
-            </div>
-
-            {/* Type & Status */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <label className="block text-sm font-bold text-slate-700">Type</label>
-                <select
-                  value={formData.keyword_type || 'concept'}
-                  onChange={(e) => setFormData({ ...formData, keyword_type: e.target.value as KeywordType })}
-                  className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-300 bg-slate-50 focus:bg-white transition-all text-slate-700"
-                >
-                  {KEYWORD_TYPE_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <label className="block text-sm font-bold text-slate-700">Status</label>
-                <select
-                  value={formData.status || 'active'}
-                  onChange={(e) => setFormData({ ...formData, status: e.target.value as KeywordStatus })}
-                  className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-300 bg-slate-50 focus:bg-white transition-all text-slate-700"
-                >
-                  {KEYWORD_STATUS_OPTIONS.map((opt) => (
-                    <option key={opt.value} value={opt.value}>{opt.label}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* AI suggestion panel */}
-            {suggestion && (
-              <div className="p-5 rounded-2xl border border-indigo-200 bg-indigo-50/60 space-y-3">
-                <div className="flex items-center gap-2 text-sm font-bold text-indigo-700">
-                  <Sparkles className="w-4 h-4" />
-                  AI suggestion — review before applying
-                </div>
-                <div className="text-sm text-slate-700">
-                  <span className="font-semibold">Definition:</span> {suggestion.definition}
-                </div>
-                {suggestion.explanation && (
-                  <div className="text-sm text-slate-600 leading-relaxed">
-                    <span className="font-semibold text-slate-700">Explanation:</span> {suggestion.explanation}
-                  </div>
-                )}
-                {suggestion.examples?.length > 0 && (
-                  <ul className="text-sm text-slate-600 list-disc pl-5 space-y-0.5">
-                    {suggestion.examples.map((ex, i) => (
-                      <li key={i}>{ex}</li>
-                    ))}
-                  </ul>
-                )}
-                <div className="flex items-center gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={applySuggestion}
-                    className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
-                  >
-                    <Check className="w-4 h-4" /> Apply to form
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setSuggestion(null)}
-                    className="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
-                  >
-                    Dismiss
-                  </button>
-                  <span className="text-xs text-slate-400">Nothing is saved until you press Save.</span>
-                </div>
-              </div>
-            )}
-            {suggestError && (
-              <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700">
-                {suggestError}
-              </div>
-            )}
-
-            {/* Definition with Voice */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="block text-sm font-bold text-slate-700">
-                  Short Definition
-                </label>
-                <div className="flex items-center gap-2">
-                  {!isNew && keyword && (
-                    <button
-                      type="button"
-                      onClick={requestSuggestion}
-                      disabled={suggesting}
-                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 disabled:opacity-60 transition-colors"
-                    >
-                      {suggesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
-                      Suggest with AI
-                    </button>
-                  )}
-                  <VoiceInput
-                    targetField="definition"
-                    onTranscript={(text) => handleVoiceTranscript(text, 'definition')}
-                  />
-                </div>
-              </div>
-              <textarea
-                value={formData.definition || ''}
-                onChange={(e) => setFormData({ ...formData, definition: e.target.value })}
-                className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-300 bg-slate-50 focus:bg-white transition-all resize-none"
-                rows={3}
-                placeholder="A concise 1-2 sentence definition..."
-              />
-            </div>
-
-            {/* Explanation with Voice */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="block text-sm font-bold text-slate-700">
-                  Detailed Explanation
-                </label>
-                <VoiceInput
-                  targetField="explanation"
-                  onTranscript={(text) => handleVoiceTranscript(text, 'explanation')}
-                />
-              </div>
-              <textarea
-                value={formData.explanation || ''}
-                onChange={(e) => setFormData({ ...formData, explanation: e.target.value })}
-                className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-300 bg-slate-50 focus:bg-white transition-all"
-                rows={6}
-                placeholder="Provide a comprehensive explanation of this concept, its context, and how it's used..."
-              />
-            </div>
-
-            {/* Synonyms */}
-            <div className="space-y-3 pt-4 border-t border-slate-100">
-              <label className="block text-sm font-bold text-slate-700">
-                Synonyms & Alternative Names
-              </label>
-              <div className="flex flex-wrap gap-2">
-                {formData.synonyms?.map((syn, i) => (
-                  <span
-                    key={i}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 border border-slate-200 rounded-lg text-sm font-medium text-slate-700"
-                  >
-                    {syn}
-                    <button
-                      type="button"
-                      onClick={() => removeSynonym(i)}
-                      className="text-slate-400 hover:text-red-500 transition-colors"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  </span>
+          {/* Parent */}
+          <div>
+            <FieldLabel de="Übergeordneter Begriff" en="Parent concept" />
+            <select
+              value={formData.parent_id || ''}
+              onChange={(e) => setFormData({ ...formData, parent_id: e.target.value || null })}
+              className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-300 bg-slate-50 focus:bg-white transition-all text-slate-700"
+            >
+              <option value="">Keiner (oberste Ebene) · None (root)</option>
+              {allKeywords
+                .filter((k) => k.id !== keyword?.id)
+                .map((k) => (
+                  <option key={k.id} value={k.id}>
+                    {k.title}
+                  </option>
                 ))}
+            </select>
+          </div>
+
+          {/* AI suggestion preview */}
+          {suggestion && (
+            <div className="p-5 rounded-2xl border border-indigo-200 bg-indigo-50/60 space-y-3">
+              <div className="flex items-center gap-2 text-sm font-bold text-indigo-700">
+                <Sparkles className="w-4 h-4" />
+                KI-Vorschlag — vor dem Übernehmen prüfen · AI suggestion, review before applying
               </div>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={newSynonym}
-                  onChange={(e) => setNewSynonym(e.target.value)}
-                  className="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-300 bg-slate-50 focus:bg-white transition-all"
-                  placeholder="Add a synonym..."
-                  onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addSynonym())}
-                />
+              <div className="text-sm text-slate-700">
+                <span className="font-semibold">Definition:</span> {suggestion.definition}
+              </div>
+              {suggestion.explanation && (
+                <div className="text-sm text-slate-600 leading-relaxed">
+                  <span className="font-semibold text-slate-700">Erklärung:</span> {suggestion.explanation}
+                </div>
+              )}
+              {suggestion.examples?.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {suggestion.examples.map((ex, i) => (
+                    <span key={i} className="px-2 py-0.5 rounded-md bg-white border border-indigo-100 text-xs text-slate-600">
+                      {ex}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="flex items-center gap-2 pt-1">
                 <button
                   type="button"
-                  onClick={addSynonym}
-                  className="px-4 py-2.5 bg-slate-100 text-slate-600 font-medium rounded-xl hover:bg-slate-200 transition-colors flex items-center gap-2"
+                  onClick={applySuggestion}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium bg-indigo-600 text-white hover:bg-indigo-700 transition-colors"
                 >
-                  <Plus className="w-4 h-4" />
-                  Add
+                  <Check className="w-4 h-4" /> Übernehmen · Apply
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setSuggestion(null)}
+                  className="px-4 py-2 rounded-xl text-sm font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 transition-colors"
+                >
+                  Verwerfen · Dismiss
+                </button>
+                <span className="text-xs text-slate-400">Nichts wird gespeichert, bis du auf „Speichern“ klickst.</span>
               </div>
             </div>
-          </div>
-        )}
+          )}
+          {suggestError && (
+            <div className="px-4 py-3 rounded-xl bg-red-50 border border-red-200 text-sm text-red-700">
+              {suggestError}
+            </div>
+          )}
 
-        {activeTab === 'examples' && (
-          <div className="space-y-8 max-w-3xl">
-            {/* Examples */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
+          {/* Definition */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <FieldLabel de="Kurze Definition" en="Short definition (meaning)" />
+              <div className="flex items-center gap-2">
+                {!isNew && keyword && (
+                  <button
+                    type="button"
+                    onClick={requestSuggestion}
+                    disabled={suggesting}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-indigo-600 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 disabled:opacity-60 transition-colors"
+                  >
+                    {suggesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                    Mit KI ausfüllen
+                  </button>
+                )}
+                <VoiceInput targetField="definition" onTranscript={(t) => handleVoiceTranscript(t, 'definition')} />
+              </div>
+            </div>
+            <textarea
+              value={formData.definition || ''}
+              onChange={(e) => setFormData({ ...formData, definition: e.target.value })}
+              className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-300 bg-slate-50 focus:bg-white transition-all resize-none"
+              rows={2}
+              placeholder="Ein bis zwei Sätze, die den Begriff erklären…"
+            />
+          </div>
+
+          {/* Explanation */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <FieldLabel de="Ausführliche Erklärung" en="Detailed explanation" />
+              <VoiceInput targetField="explanation" onTranscript={(t) => handleVoiceTranscript(t, 'explanation')} />
+            </div>
+            <textarea
+              value={formData.explanation || ''}
+              onChange={(e) => setFormData({ ...formData, explanation: e.target.value })}
+              className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-300 bg-slate-50 focus:bg-white transition-all"
+              rows={4}
+              placeholder="Kontext, Verwendung, Besonderheiten in eurem Unternehmen…"
+            />
+          </div>
+
+          {/* Examples (chips) */}
+          <div>
+            <FieldLabel de="Beispiele" en="Examples — Enter zum Hinzufügen" />
+            <ChipInput
+              values={formData.examples || []}
+              onChange={(examples) => setFormData({ ...formData, examples })}
+              placeholder="Beispiel eingeben und Enter drücken…"
+              tone="blue"
+              action={
+                <VoiceInput targetField="example" onTranscript={(t) => handleVoiceTranscript(t, 'example')} />
+              }
+            />
+          </div>
+
+          {/* Synonyms (chips) */}
+          <div>
+            <FieldLabel de="Synonyme & andere Namen" en="Synonyms & alternative names" />
+            <ChipInput
+              values={formData.synonyms || []}
+              onChange={(synonyms) => setFormData({ ...formData, synonyms })}
+              placeholder="Synonym eingeben und Enter drücken…"
+              tone="slate"
+            />
+          </div>
+
+          {/* Rules (chips) */}
+          <div>
+            <FieldLabel de="Regeln & Bedingungen" en="Business rules & constraints" />
+            <ChipInput
+              values={formData.rules || []}
+              onChange={(rules) => setFormData({ ...formData, rules })}
+              placeholder="z. B. Rechnung braucht Datum + Betrag + Lieferant"
+              tone="amber"
+            />
+          </div>
+
+          {/* Advanced (collapsible) */}
+          <div className="pt-2 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => setShowAdvanced((v) => !v)}
+              className="flex items-center gap-2 text-sm font-semibold text-slate-500 hover:text-slate-800 transition-colors"
+            >
+              <ChevronDown className={`w-4 h-4 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
+              Mehr Optionen · More options (Typ, Status, Sprachen)
+            </button>
+
+            {showAdvanced && (
+              <div className="mt-5 space-y-6 animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <FieldLabel de="Typ" en="Type" />
+                    <select
+                      value={formData.keyword_type || 'concept'}
+                      onChange={(e) => setFormData({ ...formData, keyword_type: e.target.value as KeywordType })}
+                      className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-300 bg-slate-50 focus:bg-white transition-all text-slate-700"
+                    >
+                      {KEYWORD_TYPE_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <FieldLabel de="Status" en="Status" />
+                    <select
+                      value={formData.status || 'active'}
+                      onChange={(e) => setFormData({ ...formData, status: e.target.value as KeywordStatus })}
+                      className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-300 bg-slate-50 focus:bg-white transition-all text-slate-700"
+                    >
+                      {KEYWORD_STATUS_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+
+                {/* Access level — who may see this keyword */}
                 <div>
-                  <label className="block text-sm font-bold text-slate-700">
-                    Examples
-                  </label>
-                  <p className="text-xs text-slate-500 font-medium mt-1">Real-world instances of this concept</p>
+                  <FieldLabel de="Zugriffsebene" en="Who can see this keyword" />
+                  <div className="grid grid-cols-3 gap-2">
+                    {ACCESS_LEVEL_OPTIONS.map((opt) => {
+                      const active = (formData.access_level || 'worker') === opt.value;
+                      return (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setFormData({ ...formData, access_level: opt.value })}
+                          className={`text-left px-3 py-2.5 rounded-xl border transition-all ${
+                            active
+                              ? 'border-blue-400 bg-blue-50 ring-1 ring-blue-200'
+                              : 'border-slate-200 bg-slate-50 hover:bg-white'
+                          }`}
+                        >
+                          <div className={`text-sm font-semibold ${active ? 'text-blue-700' : 'text-slate-700'}`}>
+                            {opt.label}
+                          </div>
+                          <div className="text-[10px] text-slate-400 mt-0.5">{opt.hint}</div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-slate-400 mt-1.5">
+                    Arbeiter sehen nur „Worker“-Begriffe. · Workers only see worker-level keywords.
+                  </p>
                 </div>
-                <VoiceInput
-                  targetField="example"
-                  onTranscript={(text) => handleVoiceTranscript(text, 'example')}
-                />
-              </div>
-              
-              {formData.examples && formData.examples.length > 0 && (
-                <div className="space-y-3">
-                  {formData.examples.map((ex, i) => (
-                    <div
-                      key={i}
-                      className="flex items-start gap-3 p-4 bg-blue-50/50 border border-blue-100 rounded-xl group"
-                    >
-                      <div className="w-6 h-6 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center shrink-0 text-xs font-bold mt-0.5">
-                        {i + 1}
-                      </div>
-                      <span className="flex-1 text-sm text-slate-700 leading-relaxed">{ex}</span>
-                      <button
-                        type="button"
-                        onClick={() => removeExample(i)}
-                        className="text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={newExample}
-                  onChange={(e) => setNewExample(e.target.value)}
-                  className="flex-1 px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-300 bg-slate-50 focus:bg-white transition-all"
-                  placeholder="Add a new example..."
-                  onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addExample())}
-                />
-                <button
-                  type="button"
-                  onClick={addExample}
-                  className="px-5 py-3 bg-slate-100 text-slate-700 font-medium rounded-xl hover:bg-slate-200 transition-colors flex items-center gap-2"
-                >
-                  <Plus className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
 
-            {/* Rules */}
-            <div className="space-y-4 pt-4 border-t border-slate-100">
-              <div>
-                <label className="block text-sm font-bold text-slate-700">
-                  Rules & Constraints
-                </label>
-                <p className="text-xs text-slate-500 font-medium mt-1">Business logic or conditions that apply to this concept</p>
-              </div>
-              
-              {formData.rules && formData.rules.length > 0 && (
-                <div className="space-y-3">
-                  {formData.rules.map((rule, i) => (
-                    <div
-                      key={i}
-                      className="flex items-start gap-3 p-4 bg-amber-50/50 border border-amber-100 rounded-xl group"
-                    >
-                      <div className="w-6 h-6 rounded-full bg-amber-100 text-amber-600 flex items-center justify-center shrink-0 text-xs font-bold mt-0.5">
-                        {i + 1}
-                      </div>
-                      <span className="flex-1 text-sm text-slate-700 leading-relaxed">{rule}</span>
-                      <button
-                        type="button"
-                        onClick={() => removeRule(i)}
-                        className="text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
+                {/* Multilingual labels */}
+                <div>
+                  <FieldLabel de="Sprachlabels" en="Translations" />
+                  {Object.keys(formData.labels_json || {}).length > 0 && (
+                    <div className="space-y-2 mb-3">
+                      {Object.entries(formData.labels_json || {}).map(([lang, value]) => (
+                        <div key={lang} className="flex items-center gap-3 p-2.5 bg-slate-50 border border-slate-200 rounded-xl group">
+                          <span className="w-9 h-9 rounded-lg bg-slate-200 text-slate-600 flex items-center justify-center text-xs font-bold uppercase">
+                            {lang}
+                          </span>
+                          <span className="flex-1 text-sm font-medium text-slate-700">{value}</span>
+                          <button
+                            type="button"
+                            onClick={() => removeLabel(lang)}
+                            className="text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-1.5"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  )}
+                  <div className="flex gap-2">
+                    <div className="relative">
+                      <Globe className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={newLabelLang}
+                        onChange={(e) => setNewLabelLang(e.target.value)}
+                        className="w-24 pl-9 pr-2 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 bg-slate-50 focus:bg-white transition-all text-center uppercase text-sm"
+                        placeholder="DE"
+                        maxLength={5}
+                      />
+                    </div>
+                    <input
+                      type="text"
+                      value={newLabelValue}
+                      onChange={(e) => setNewLabelValue(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addLabel())}
+                      className="flex-1 px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 bg-slate-50 focus:bg-white transition-all text-sm"
+                      placeholder="Übersetzung…"
+                    />
+                    <button
+                      type="button"
+                      onClick={addLabel}
+                      className="px-4 py-2.5 bg-slate-100 text-slate-700 font-medium rounded-xl hover:bg-slate-200 transition-colors"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
-              )}
-              
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={newRule}
-                  onChange={(e) => setNewRule(e.target.value)}
-                  className="flex-1 px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-300 bg-slate-50 focus:bg-white transition-all"
-                  placeholder="e.g., An invoice must have date + amount + supplier"
-                  onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addRule())}
-                />
-                <button
-                  type="button"
-                  onClick={addRule}
-                  className="px-5 py-3 bg-slate-100 text-slate-700 font-medium rounded-xl hover:bg-slate-200 transition-colors flex items-center gap-2"
-                >
-                  <Plus className="w-4 h-4" />
-                  Add
-                </button>
+
+                {/* Color */}
+                <div>
+                  <FieldLabel de="Farbe" en="Color" />
+                  <div className="flex items-center gap-3">
+                    <div className="relative w-11 h-11 rounded-xl overflow-hidden border-2 border-slate-200 shadow-sm shrink-0">
+                      <input
+                        type="color"
+                        value={formData.color || '#3b82f6'}
+                        onChange={(e) => setFormData({ ...formData, color: e.target.value })}
+                        className="absolute -inset-2 w-16 h-16 cursor-pointer"
+                      />
+                    </div>
+                    <input
+                      type="text"
+                      value={formData.color || ''}
+                      onChange={(e) => setFormData({ ...formData, color: e.target.value })}
+                      className="flex-1 max-w-[180px] px-4 py-2.5 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 bg-slate-50 focus:bg-white transition-all font-mono text-sm"
+                      placeholder="#3b82f6"
+                    />
+                  </div>
+                </div>
               </div>
-            </div>
+            )}
           </div>
-        )}
-
-        {activeTab === 'advanced' && (
-          <div className="space-y-8 max-w-3xl">
-            {/* Multilingual Labels */}
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-bold text-slate-700">
-                  Multilingual Labels
-                </label>
-                <p className="text-xs text-slate-500 font-medium mt-1">Translations for this concept in other languages</p>
-              </div>
-              
-              {Object.keys(formData.labels_json || {}).length > 0 && (
-                <div className="space-y-3">
-                  {Object.entries(formData.labels_json || {}).map(([lang, value]) => (
-                    <div
-                      key={lang}
-                      className="flex items-center gap-3 p-3 bg-slate-50 border border-slate-200 rounded-xl group"
-                    >
-                      <span className="w-10 h-10 rounded-lg bg-slate-200 text-slate-600 flex items-center justify-center text-xs font-bold uppercase">
-                        {lang}
-                      </span>
-                      <span className="flex-1 text-sm font-medium text-slate-700">{value}</span>
-                      <button
-                        type="button"
-                        onClick={() => removeLabel(lang)}
-                        className="text-slate-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity p-2"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={newLabelLang}
-                  onChange={(e) => setNewLabelLang(e.target.value)}
-                  className="w-24 px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-300 bg-slate-50 focus:bg-white transition-all text-center uppercase"
-                  placeholder="e.g. DE"
-                  maxLength={2}
-                />
-                <input
-                  type="text"
-                  value={newLabelValue}
-                  onChange={(e) => setNewLabelValue(e.target.value)}
-                  className="flex-1 px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-300 bg-slate-50 focus:bg-white transition-all"
-                  placeholder="Translation..."
-                  onKeyPress={(e) => e.key === 'Enter' && (e.preventDefault(), addLabel())}
-                />
-                <button
-                  type="button"
-                  onClick={addLabel}
-                  className="px-5 py-3 bg-slate-100 text-slate-700 font-medium rounded-xl hover:bg-slate-200 transition-colors flex items-center gap-2"
-                >
-                  <Plus className="w-4 h-4" />
-                  Add
-                </button>
-              </div>
-            </div>
-
-            {/* Color */}
-            <div className="space-y-3 pt-4 border-t border-slate-100">
-              <label className="block text-sm font-bold text-slate-700">
-                UI Color Theme
-              </label>
-              <div className="flex items-center gap-4">
-                <div className="relative w-12 h-12 rounded-xl overflow-hidden border-2 border-slate-200 shadow-sm shrink-0">
-                  <input
-                    type="color"
-                    value={formData.color || '#3b82f6'}
-                    onChange={(e) => setFormData({ ...formData, color: e.target.value })}
-                    className="absolute -inset-2 w-16 h-16 cursor-pointer"
-                  />
-                </div>
-                <input
-                  type="text"
-                  value={formData.color || ''}
-                  onChange={(e) => setFormData({ ...formData, color: e.target.value })}
-                  className="flex-1 max-w-[200px] px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-300 bg-slate-50 focus:bg-white transition-all font-mono text-sm"
-                  placeholder="#3b82f6"
-                />
-              </div>
-            </div>
-          </div>
-        )}
+        </div>
       </form>
 
-      {/* Footer Actions */}
-      <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50 shrink-0">
-        <button
-          type="button"
-          onClick={onClose}
-          className="px-5 py-2.5 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 hover:text-slate-900 transition-colors"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          onClick={handleSubmit}
-          className="flex items-center gap-2 px-6 py-2.5 text-sm font-medium text-white bg-blue-600 rounded-xl hover:bg-blue-700 shadow-sm shadow-blue-600/20 transition-all active:scale-95"
-        >
-          <Save className="w-4 h-4" />
-          {isNew ? 'Create Concept' : 'Save Changes'}
-        </button>
+      {/* Footer */}
+      <div className="flex items-center justify-between gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50/50 shrink-0">
+        <span className="text-xs text-slate-400 hidden sm:block">
+          {canSave ? 'Bereit zum Speichern · Ready to save' : 'Titel eingeben, um zu starten · Enter a title to start'}
+        </span>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-5 py-2.5 text-sm font-medium text-slate-600 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 hover:text-slate-900 transition-colors"
+          >
+            Abbrechen · Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => handleSubmit()}
+            disabled={!canSave || saving}
+            className="flex items-center gap-2 px-6 py-2.5 text-sm font-medium text-white bg-blue-600 rounded-xl hover:bg-blue-700 shadow-sm shadow-blue-600/20 transition-all active:scale-95 disabled:opacity-50 disabled:active:scale-100"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            {isNew ? 'Begriff erstellen · Create' : 'Speichern · Save'}
+          </button>
+        </div>
       </div>
     </div>
   );
