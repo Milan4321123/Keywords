@@ -54,6 +54,8 @@ export interface TraversalOptions {
   intent?: TraversalIntent;
   includeHierarchy?: boolean;
   minRelevance?: number;
+  /** Restrict loaded keywords to these access levels (Worker/Bauleiter/Admin). */
+  accessLevels?: string[];
 }
 
 const DEPTH_DECAY = 0.65;
@@ -162,11 +164,15 @@ export async function getDependencyContext(
   const kept = ranked.slice(0, maxNodes);
   const keptIds = new Set(kept.map(([id]) => id));
 
-  const { data: keywords } = await supabase
+  let keywordQuery = supabase
     .from('keywords')
     .select('*')
     .eq('organization_id', organizationId)
     .in('id', Array.from(keptIds));
+  if (options.accessLevels && options.accessLevels.length > 0) {
+    keywordQuery = keywordQuery.in('access_level', options.accessLevels);
+  }
+  const { data: keywords } = await keywordQuery;
 
   const keywordById = new Map((keywords ?? []).map((k) => [k.id, k as Keyword]));
 

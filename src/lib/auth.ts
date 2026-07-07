@@ -43,12 +43,61 @@ const ROLE_PERMISSIONS: Record<OrgRole, Permission[]> = {
     'view_keywords', 'view_datasets', 'run_ai', 'generate_reports', 'export_data',
   ],
   editor: ['view_keywords', 'edit_keywords', 'upload_assets', 'view_datasets', 'run_ai'],
-  viewer: ['view_keywords', 'view_datasets', 'run_ai'],
+  // "viewer" = the on-site Worker: sees keywords and uploads evidence
+  // (notes, voice, photos, files), but cannot create or edit keywords.
+  viewer: ['view_keywords', 'upload_assets', 'view_datasets', 'run_ai'],
   guest: ['view_keywords', 'view_datasets'],
 };
 
 export function roleHasPermission(role: OrgRole, permission: Permission): boolean {
   return ROLE_PERMISSIONS[role]?.includes(permission) ?? false;
+}
+
+// =====================================================
+// Keyword access levels (Worker / Bauleiter / Admin)
+// =====================================================
+
+export type KeywordAccessLevel = 'worker' | 'manager' | 'admin';
+
+const ROLE_ACCESS_TIER: Record<OrgRole, number> = {
+  owner: 3,
+  admin: 3,
+  manager: 2, // Bauleiter / Schichtleiter
+  editor: 2,
+  analyst: 1,
+  viewer: 1, // Worker
+  guest: 1,
+};
+
+const LEVEL_TIER: Record<KeywordAccessLevel, number> = {
+  worker: 1,
+  manager: 2,
+  admin: 3,
+};
+
+export const ALL_ACCESS_LEVELS: KeywordAccessLevel[] = ['worker', 'manager', 'admin'];
+
+export function roleAccessTier(role: OrgRole): number {
+  return ROLE_ACCESS_TIER[role] ?? 1;
+}
+
+/** Keyword access levels this role is allowed to see. */
+export function accessibleLevels(role: OrgRole): KeywordAccessLevel[] {
+  const tier = roleAccessTier(role);
+  return ALL_ACCESS_LEVELS.filter((level) => LEVEL_TIER[level] <= tier);
+}
+
+/** Whether a role may assign a keyword to a given access level (can't exceed own tier). */
+export function canUseAccessLevel(role: OrgRole, level: KeywordAccessLevel): boolean {
+  return LEVEL_TIER[level] <= roleAccessTier(role);
+}
+
+/**
+ * The simplified on-site "Worker" experience: can contribute evidence but
+ * cannot author keywords. These users land on the Work view by default.
+ */
+export function isWorkerRole(role: OrgRole): boolean {
+  return roleHasPermission(role, 'upload_assets') && !roleHasPermission(role, 'edit_keywords');
 }
 
 export const ACTIVE_ORG_COOKIE = 'active_org';

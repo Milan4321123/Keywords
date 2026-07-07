@@ -68,6 +68,8 @@ export type KeywordType =
 
 export type KeywordStatus = 'draft' | 'active' | 'archived';
 
+export type KeywordAccessLevel = 'worker' | 'manager' | 'admin';
+
 export interface KeywordVersion {
   id: string;
   keyword_id: string;
@@ -84,6 +86,7 @@ export interface Keyword {
   organization_id?: string;
   keyword_type?: KeywordType;
   status?: KeywordStatus;
+  access_level?: KeywordAccessLevel;
   completeness_score?: number;
   parent_id: string | null;
   title: string;
@@ -162,6 +165,10 @@ export interface Asset {
   meta_json: Record<string, any>;
   thumbnail_url: string | null;
   processed: boolean;
+  processing_status?: 'pending' | 'processing' | 'processed' | 'failed';
+  title?: string | null;
+  description?: string | null;
+  source?: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;

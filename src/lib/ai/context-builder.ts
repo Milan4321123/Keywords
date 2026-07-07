@@ -1,4 +1,4 @@
-import { OrgContext } from '@/lib/auth';
+import { OrgContext, accessibleLevels } from '@/lib/auth';
 import { createEmbedding } from '@/lib/openai';
 import { extractPotentialKeywords, rankChunks } from '@/lib/ai-context';
 import { getDependencyContext, DependencyContext } from '@/lib/ontology/graph';
@@ -111,11 +111,14 @@ export async function buildContext(
   const supabase = ctx.supabase;
   const missing: string[] = [];
 
-  // 1. Keyword routing: explicit scope + exact/synonym matches
+  // 1. Keyword routing: explicit scope + exact/synonym matches.
+  // Access-level filter ensures a Worker's AI answer never draws on
+  // manager/admin-only keywords they cannot see.
   const { data: allKeywords } = await supabase
     .from('keywords')
     .select('*')
     .eq('organization_id', ctx.org.id)
+    .in('access_level', accessibleLevels(ctx.role))
     .neq('status', 'archived');
 
   const mentioned = extractPotentialKeywords(question, allKeywords ?? []);
@@ -128,6 +131,7 @@ export async function buildContext(
     maxDepth: 2,
     maxNodes: CONTEXT_BUDGET.maxKeywords,
     intent: traversalIntentFor(intent),
+    accessLevels: accessibleLevels(ctx.role),
   });
 
   let keywords = dependency.nodes.map((n) => n.keyword);

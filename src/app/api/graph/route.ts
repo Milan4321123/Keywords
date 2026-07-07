@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireOrgContext } from '@/lib/auth';
+import { requireOrgContext, accessibleLevels } from '@/lib/auth';
 import { apiError } from '@/lib/api';
 
 // GET /api/graph - Full org keyword graph for the visual graph view
@@ -12,6 +12,7 @@ export async function GET(_req: NextRequest) {
         .from('keywords')
         .select('id, title, slug, parent_id, keyword_type, status, completeness_score, definition, color')
         .eq('organization_id', ctx.org.id)
+        .in('access_level', accessibleLevels(ctx.role))
         .order('title')
         .limit(500),
       ctx.supabase

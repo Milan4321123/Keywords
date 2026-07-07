@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireOrgContext } from '@/lib/auth';
+import { requireOrgContext, accessibleLevels } from '@/lib/auth';
 import { apiError } from '@/lib/api';
 import { getDependencyContext, TraversalIntent } from '@/lib/ontology/graph';
 import { RelationType } from '@/types';
@@ -28,6 +28,7 @@ export async function POST(req: NextRequest) {
         ? (body.relation_types as RelationType[])
         : undefined,
       includeHierarchy: body.include_hierarchy !== false,
+      accessLevels: accessibleLevels(ctx.role),
     });
 
     return NextResponse.json({

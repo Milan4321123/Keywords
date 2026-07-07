@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireOrgContext, audit } from '@/lib/auth';
+import { requireOrgContext, audit, accessibleLevels, canUseAccessLevel, KeywordAccessLevel } from '@/lib/auth';
 import { apiError } from '@/lib/api';
 import { computeCompleteness } from '@/lib/ontology/completeness';
 
@@ -15,10 +15,12 @@ export async function GET(req: NextRequest) {
   try {
     const ctx = await requireOrgContext('view_keywords');
 
+    // Only keywords at or below the member's access tier (Worker/Bauleiter/Admin)
     const { data: keywords, error } = await ctx.supabase
       .from('keywords')
       .select('*')
       .eq('organization_id', ctx.org.id)
+      .in('access_level', accessibleLevels(ctx.role))
       .order('sort_order')
       .order('title');
 
@@ -62,6 +64,18 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    // Access level: default worker; can't create above your own tier
+    let accessLevel: KeywordAccessLevel = 'worker';
+    if (body.access_level && ['worker', 'manager', 'admin'].includes(body.access_level)) {
+      if (!canUseAccessLevel(ctx.role, body.access_level)) {
+        return NextResponse.json(
+          { data: null, error: 'You cannot create keywords above your own access level' },
+          { status: 403 }
+        );
+      }
+      accessLevel = body.access_level;
+    }
+
     const { score } = computeCompleteness({
       definition: body.definition,
       explanation: body.explanation,
@@ -79,6 +93,7 @@ export async function POST(req: NextRequest) {
         parent_id: body.parent_id || null,
         keyword_type: KEYWORD_TYPES.includes(body.keyword_type) ? body.keyword_type : 'concept',
         status: KEYWORD_STATUSES.includes(body.status) ? body.status : 'active',
+        access_level: accessLevel,
         definition: body.definition || null,
         explanation: body.explanation || null,
         examples: body.examples || [],
