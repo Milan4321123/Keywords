@@ -114,6 +114,53 @@ The full product design (architecture, schema, AI routing, security model, miles
 5. **Open the app**
    Navigate to [http://localhost:3000](http://localhost:3000), sign up, and create your organization.
 
+### Demo businesses (recommended first step)
+
+Two fully modeled example businesses — a construction contractor and a restaurant — with layered keyword definitions, business rules, semantic relations, real datasets, metrics, and open tasks:
+
+```bash
+npm run seed:demo                        # attaches the oldest account as owner
+npm run seed:demo -- --email you@x.com   # or a specific account
+npm run seed:demo -- --reset             # wipe + recreate the demo orgs
+```
+
+This creates **Demo Bau GmbH** (`demo-bau`) and **Ristorante Bella Vista** (`demo-restaurant`). Log in and switch organizations to explore them, or use them as templates for your own business.
+
+## LLM Vault Connector (Obsidian-style)
+
+Compile any organization into a plain markdown folder that Claude Code — or any file-reading agent — can be pointed at directly. Token-efficient by design: the agent reads a one-line-per-keyword `INDEX.md`, then opens only the keyword files it needs, following `[[wiki-links]]` for dependencies and computing numbers from `data/*.csv` with shell tools instead of loading data into context.
+
+```bash
+npm run vault -- --org demo-bau --out ./vault-bau
+cd vault-bau && claude       # CLAUDE.md tells the agent how to navigate
+```
+
+The vault contains: `CLAUDE.md` (agent contract), `INDEX.md` (map of content), `WORLD_MODEL.md` (compiled org summary), `keywords/*.md` (one skill file per keyword with frontmatter, rules, relations), `data/` (dataset CSVs, schema cards, metric catalog, open tasks), `assets/` (uploaded files + extracted text), and `INSIGHTS/` (see below). The folder also opens directly as an Obsidian vault with a working link graph. Re-running the sync refreshes everything except `INSIGHTS/`.
+
+### Insight loop (background analysis)
+
+The vault ships with a Claude Code skill, `/insight-loop`: one iteration picks the next focus area, digs into keyword files and CSVs, writes evidence-graded insight notes to `INSIGHTS/`, and re-tests earlier insights. State persists in `INSIGHTS/LEDGER.md`, so every run builds on the last. For continuous background operation:
+
+```bash
+cd vault-bau && claude
+> /loop 30m /insight-loop
+```
+
+## Production Deployment
+
+`npm run build` produces a standalone Next.js server. Two supported paths:
+
+- **Vercel:** import the repo, set the four env vars from `.env.example`, deploy.
+- **Docker:** the included `Dockerfile` builds a hardened standalone image with a `/api/health` healthcheck:
+  ```bash
+  docker build -t company-brain \
+    --build-arg NEXT_PUBLIC_SUPABASE_URL=... \
+    --build-arg NEXT_PUBLIC_SUPABASE_ANON_KEY=... .
+  docker run -p 3000:3000 -e SUPABASE_SERVICE_ROLE_KEY=... -e OPENAI_API_KEY=... company-brain
+  ```
+
+Checklist: Supabase `setup_complete.sql` applied, `assets` bucket private, email auth enabled, env vars set, `npm run build` green, `/api/health` returns 200.
+
 ## Database Schema
 
 ### Keywords Table
