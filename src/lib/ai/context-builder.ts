@@ -3,6 +3,7 @@ import { createEmbedding } from '@/lib/openai';
 import { extractPotentialKeywords, rankChunks } from '@/lib/ai-context';
 import { getDependencyContext, DependencyContext } from '@/lib/ontology/graph';
 import { Intent, traversalIntentFor } from './router';
+import { readCachedWorldModel } from './skills';
 import { Keyword } from '@/types';
 
 export interface DatasetTableSchema {
@@ -267,8 +268,18 @@ export async function buildContext(
     system_instructions: 'Answer only from grounded company context and computed data.',
   };
 
-  // 6. Render context text (priority: definitions → rules → relations → schemas → documents)
+  // 6. Render context text (priority: world model → definitions → rules → relations → schemas → documents)
   const parts: string[] = [];
+  try {
+    const worldModel = await readCachedWorldModel(ctx);
+    if (worldModel?.markdown) {
+      parts.push('## Organization World Model (compiled from the company ontology)');
+      parts.push(truncate(worldModel.markdown, 3500));
+      parts.push('');
+    }
+  } catch (error) {
+    console.error('World model unavailable:', error);
+  }
   if (keywords.length > 0) {
     parts.push('## Company Ontology');
     for (const k of keywords.slice(0, CONTEXT_BUDGET.maxKeywords)) {

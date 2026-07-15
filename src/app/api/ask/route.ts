@@ -4,6 +4,7 @@ import { enforceRateLimit } from '@/lib/rate-limit';
 import { createEmbedding, chatCompletion, rerankChunks } from '@/lib/openai';
 import { buildAIContext, getSystemPrompt, extractPotentialKeywords, rankChunks } from '@/lib/ai-context';
 import { getDependencyContext, edgesToRelations } from '@/lib/ontology/graph';
+import { readCachedWorldModel } from '@/lib/ai/skills';
 import { Keyword, KeywordRelation, Chunk, AskAIResponse } from '@/types';
 
 type ChunkWithSimilarity = Chunk & { similarity: number };
@@ -231,12 +232,22 @@ export async function POST(req: NextRequest) {
       maxFieldChars: 800,
     });
 
-    // 8. Generate response using GPT
-    const systemPrompt = getSystemPrompt('Your Company');
-    
+    // 8. Generate response using GPT, grounded on the compiled world model
+    const systemPrompt = getSystemPrompt(ctx.org.name);
+
+    let worldModelBlock = '';
+    try {
+      const worldModel = await readCachedWorldModel(ctx);
+      if (worldModel?.markdown) {
+        worldModelBlock = `## Organization World Model (compiled from the company ontology)\n${worldModel.markdown.slice(0, 3500)}\n\n`;
+      }
+    } catch (error) {
+      console.error('World model unavailable:', error);
+    }
+
     const messages = [
       { role: 'system' as const, content: systemPrompt },
-      { role: 'system' as const, content: `Here is the relevant context from the company knowledge base:\n\n${context}` },
+      { role: 'system' as const, content: `Here is the relevant context from the company knowledge base:\n\n${worldModelBlock}${context}` },
       { role: 'user' as const, content: question },
     ];
 
