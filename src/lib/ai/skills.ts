@@ -191,7 +191,7 @@ export async function getWorldModel(
       },
       { role: 'user', content: skeleton },
     ],
-    { model: 'gpt-4o', temperature: 0.3, max_tokens: 1400 }
+    { temperature: 0.3, max_tokens: 1400 }
   );
 
   const model: WorldModel = {

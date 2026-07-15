@@ -25,6 +25,12 @@ function mapAIProviderError(error: unknown): { status: number; message: string }
       message: 'KI-Anbieter überlastet, bitte kurz warten · AI provider rate-limited, retry shortly',
     };
   }
+  if (/OPENAI_API_KEY is not configured|environment variable is missing/i.test(message)) {
+    return {
+      status: 503,
+      message: 'KI nicht konfiguriert — OPENAI_API_KEY setzen · AI not configured, set OPENAI_API_KEY',
+    };
+  }
   if (/incorrect api key|invalid api key/i.test(message)) {
     return {
       status: 503,

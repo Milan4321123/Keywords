@@ -1,4 +1,4 @@
-import { openai } from '@/lib/openai';
+import { openai, AI_MODELS } from '@/lib/openai';
 
 export type AIProviderName = 'openai' | 'anthropic';
 
@@ -21,7 +21,7 @@ export interface AIProvider {
   chat(messages: ProviderChatMessage[], options?: ProviderChatOptions): Promise<string>;
 }
 
-const OPENAI_MODELS = { fast: 'gpt-4o-mini', strong: 'gpt-4o' };
+const OPENAI_MODELS = { fast: AI_MODELS.fast, strong: AI_MODELS.chat };
 const ANTHROPIC_MODELS = {
   fast: process.env.ANTHROPIC_FAST_MODEL ?? 'claude-haiku-4-5-20251001',
   strong: process.env.ANTHROPIC_MODEL ?? 'claude-sonnet-5',

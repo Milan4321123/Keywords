@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireOrgContext, audit } from '@/lib/auth';
 import { apiError } from '@/lib/api';
 import { enforceRateLimit } from '@/lib/rate-limit';
-import { openai } from '@/lib/openai';
+import { openai, AI_MODELS } from '@/lib/openai';
 import {
   loadOntology,
   getWorldModel,
@@ -195,7 +195,7 @@ Respond with ONLY valid JSON: {"insights":[{"severity":"high|medium|low","catego
     });
 
     const response = await openai.chat.completions.create({
-      model: 'gpt-4o',
+      model: AI_MODELS.chat,
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: user },

@@ -1,12 +1,44 @@
 import OpenAI from 'openai';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+/**
+ * Model configuration — overridable via env so the app can run against any
+ * OpenAI-compatible endpoint (Ollama, vLLM, Together, LM Studio, …):
+ *   OPENAI_BASE_URL=http://localhost:11434/v1   (honored by the SDK)
+ *   OPENAI_CHAT_MODEL=llama3.1:8b
+ *   OPENAI_FAST_MODEL=llama3.1:8b
+ *   OPENAI_EMBEDDING_MODEL=nomic-embed-text     (must produce 1536 dims to
+ *                                                match the pgvector schema)
+ */
+export const AI_MODELS = {
+  chat: process.env.OPENAI_CHAT_MODEL ?? 'gpt-4o',
+  fast: process.env.OPENAI_FAST_MODEL ?? 'gpt-4o-mini',
+  embedding: process.env.OPENAI_EMBEDDING_MODEL ?? 'text-embedding-ada-002',
+};
+
+// Lazy client: never construct at module load — Docker/CI builds have no
+// OPENAI_API_KEY, and Next imports route modules while collecting page data.
+let _client: OpenAI | null = null;
+function getClient(): OpenAI {
+  if (!_client) {
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey && !process.env.OPENAI_BASE_URL) {
+      throw new Error('OPENAI_API_KEY is not configured');
+    }
+    _client = new OpenAI({ apiKey: apiKey ?? 'unused' });
+  }
+  return _client;
+}
+
+const openai = new Proxy({} as OpenAI, {
+  get(_target, prop) {
+    const value = (getClient() as any)[prop];
+    return typeof value === 'function' ? value.bind(_client) : value;
+  },
 });
 
 export async function createEmbedding(text: string): Promise<number[]> {
   const response = await openai.embeddings.create({
-    model: 'text-embedding-ada-002',
+    model: AI_MODELS.embedding,
     input: text,
   });
   return response.data[0].embedding;
@@ -17,7 +49,7 @@ export async function chatCompletion(
   options?: { temperature?: number; max_tokens?: number; model?: string }
 ): Promise<string> {
   const response = await openai.chat.completions.create({
-    model: options?.model ?? 'gpt-4-turbo-preview',
+    model: options?.model ?? AI_MODELS.chat,
     messages,
     temperature: options?.temperature ?? 0.7,
     max_tokens: options?.max_tokens ?? 2000,
@@ -32,7 +64,7 @@ export async function rerankChunks(params: {
   model?: string;
 }): Promise<Array<{ id: string; score: number }>> {
   const topN = Math.max(1, Math.min(params.topN ?? 10, 20));
-  const model = params.model ?? 'gpt-4o-mini';
+  const model = params.model ?? AI_MODELS.fast;
 
   // Keep payload bounded
   const candidates = params.chunks.slice(0, 25).map((c) => ({
