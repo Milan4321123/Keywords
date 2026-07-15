@@ -1,79 +1,66 @@
 'use client';
 
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
-  Database, 
   Search,
   ChevronRight,
+  ChevronLeft,
   Plus,
-  FileUp,
-  Link2,
-  MessageSquare,
-  Edit3,
   X,
-  ImagePlus,
+  Loader2,
+  Pencil,
   Paperclip,
-  SendHorizontal,
-  FolderTree,
-  Trash2,
-  Sparkles
+  Sparkles,
+  BookOpen,
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import { Keyword, Asset, KeywordRelation } from '@/types';
+import { Keyword } from '@/types';
 import KeywordDetail from '@/components/KeywordDetail';
-import FileUpload from '@/components/FileUpload';
-import RelationEditor from '@/components/RelationEditor';
 import AIAssistant from '@/components/AIAssistant';
-import VoiceInput from '@/components/VoiceInput';
 import ImportExportMenu from '@/components/ImportExportMenu';
-import { openAsset } from '@/lib/asset-view';
 
 function completenessDot(score: number | undefined): string {
   const s = score ?? 0;
   if (s >= 70) return 'bg-emerald-500';
-  if (s >= 40) return 'bg-amber-500';
-  return 'bg-red-400';
+  if (s >= 40) return 'bg-amber-400';
+  return 'bg-slate-300';
 }
 
-type ViewMode = 'edit' | 'upload' | 'relations' | 'chat';
-
-export default function Home() {
+export default function KeywordsPage() {
   const router = useRouter();
-  // State
+
   const [keywords, setKeywords] = useState<Keyword[]>([]);
-  const [showMissingOnly, setShowMissingOnly] = useState(false);
-  const [selectedKeyword, setSelectedKeyword] = useState<Keyword | null>(null);
-  const [relations, setRelations] = useState<KeywordRelation[]>([]);
-  const [assets, setAssets] = useState<Asset[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isNewKeyword, setIsNewKeyword] = useState(false);
-  const [newKeywordParentId, setNewKeywordParentId] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>('edit');
+
+  // Drill-down navigation: which keyword we are "inside" (null = top level)
+  const [currentId, setCurrentId] = useState<string | null>(null);
+  const [direction, setDirection] = useState<'fwd' | 'back'>('fwd');
+
   const [searchQuery, setSearchQuery] = useState('');
-  const workspaceRef = useRef<HTMLDivElement | null>(null);
-  const detailRequestSeqRef = useRef(0);
-  const keywordDetailCacheRef = useRef<Map<string, Keyword>>(new Map());
-  const quickFileInputRef = useRef<HTMLInputElement | null>(null);
-  const quickImageInputRef = useRef<HTMLInputElement | null>(null);
-  const [uploadNote, setUploadNote] = useState('');
+
+  // Quick add (inline, Reminders-style)
+  const [draft, setDraft] = useState('');
+  const [creating, setCreating] = useState(false);
+  const quickAddRef = useRef<HTMLInputElement | null>(null);
+
+  // Edit sheet
+  const [editing, setEditing] = useState<Keyword | null>(null);
+
+  // Lightweight toast for errors
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const [aiOpen, setAiOpen] = useState(false);
+  // Chat scoping: which keywords the AI should focus on (follows navigation).
+  const [chatScopeIds, setChatScopeIds] = useState<string[]>([]);
 
-  // Chat scoping: which keywords the AI should focus on.
-  const [chatScopeKeywordIds, setChatScopeKeywordIds] = useState<string[]>([]);
-
-  // Fetch keywords on mount
-  useEffect(() => {
-    fetchKeywords();
+  const showToast = useCallback((message: string) => {
+    setToast(message);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setToast(null), 3500);
   }, []);
 
-  // Fetch keyword details when selected
-  useEffect(() => {
-    if (selectedKeyword && !isNewKeyword) {
-      fetchKeywordDetails(selectedKeyword.id);
-    }
-  }, [selectedKeyword?.id, isNewKeyword]);
-
-  const fetchKeywords = async () => {
+  const fetchKeywords = useCallback(async () => {
     try {
       const response = await fetch('/api/keywords');
       const { data, error } = await response.json();
@@ -81,782 +68,441 @@ export default function Home() {
       setKeywords(data || []);
     } catch (error) {
       console.error('Failed to fetch keywords:', error);
+      showToast('Begriffe konnten nicht geladen werden · Could not load keywords');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [showToast]);
 
-  const fetchKeywordDetails = async (id: string) => {
-    const cached = keywordDetailCacheRef.current.get(id);
-    if (cached) {
-      setSelectedKeyword((prev) => (prev?.id === id ? cached : prev));
-      setRelations((cached.relations || []) as KeywordRelation[]);
-      setAssets((cached.assets || []) as Asset[]);
-      return;
-    }
+  useEffect(() => {
+    fetchKeywords();
+  }, [fetchKeywords]);
 
-    const seq = ++detailRequestSeqRef.current;
+  // Lock body scroll while the edit sheet is open
+  useEffect(() => {
+    document.body.style.overflow = editing ? 'hidden' : '';
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [editing]);
 
-    try {
-      const response = await fetch(`/api/keywords/${id}`);
-      const { data, error } = await response.json();
-      if (error) throw new Error(error);
+  useEffect(() => {
+    if (!editing) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setEditing(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [editing]);
 
-      if (seq !== detailRequestSeqRef.current) return;
+  const byId = useMemo(() => new Map(keywords.map((k) => [k.id, k] as const)), [keywords]);
 
-      keywordDetailCacheRef.current.set(id, data);
-      setSelectedKeyword((prev) => (prev?.id === id ? data : prev));
-      setRelations(data.relations || []);
-      setAssets(data.assets || []);
-    } catch (error) {
-      console.error('Failed to fetch keyword details:', error);
-    }
-  };
-
-  const handleSelectKeyword = useCallback((keyword: Keyword) => {
-    setSelectedKeyword(keyword);
-    setIsNewKeyword(false);
-    setViewMode('edit');
-
-    const cached = keywordDetailCacheRef.current.get(keyword.id);
-    if (cached) {
-      setRelations((cached.relations || []) as KeywordRelation[]);
-      setAssets((cached.assets || []) as Asset[]);
-    } else {
-      setRelations([]);
-      setAssets([]);
-    }
-  }, []);
-
-  const handleSelectKeywordById = useCallback(
-    (id: string) => {
-      const found = keywords.find((k) => k.id === id);
-      if (found) handleSelectKeyword(found);
-    },
-    [keywords, handleSelectKeyword]
-  );
-
-  const handleAddChild = useCallback((parentId: string | null) => {
-    setSelectedKeyword(null);
-    setIsNewKeyword(true);
-    setNewKeywordParentId(parentId);
-    setViewMode('edit');
-  }, []);
-
-  const handleSaveKeyword = async (keywordData: Partial<Keyword>) => {
-    try {
-      const url = isNewKeyword ? '/api/keywords' : `/api/keywords/${selectedKeyword?.id}`;
-      const method = isNewKeyword ? 'POST' : 'PUT';
-
-      const response = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...keywordData,
-          parent_id: isNewKeyword ? newKeywordParentId : keywordData.parent_id,
-        }),
-      });
-
-      const { data, error } = await response.json();
-      if (error) throw new Error(error);
-
-      // Refresh keywords list
-      await fetchKeywords();
-      
-      // Select the new/updated keyword
-      keywordDetailCacheRef.current.set(data.id, data);
-      setSelectedKeyword(data);
-      setIsNewKeyword(false);
-    } catch (error) {
-      console.error('Failed to save keyword:', error);
-    }
-  };
-
-  const handleDeleteKeyword = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this keyword?')) return;
-
-    try {
-      const response = await fetch(`/api/keywords/${id}`, {
-        method: 'DELETE',
-      });
-
-      const { error } = await response.json();
-      if (error) throw new Error(error);
-
-      // Refresh and clear selection
-      await fetchKeywords();
-      keywordDetailCacheRef.current.delete(id);
-      setSelectedKeyword(null);
-    } catch (error) {
-      console.error('Failed to delete keyword:', error);
-    }
-  };
-
-  const handleCloseDetail = useCallback(() => {
-    setSelectedKeyword(null);
-    setIsNewKeyword(false);
-    setUploadNote('');
-  }, []);
-
-  const handleUploadFiles = async (files: File[]) => {
-    if (!selectedKeyword) return;
-
-    for (const file of files) {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('keyword_id', selectedKeyword.id);
-
-      try {
-        const response = await fetch('/api/assets/upload', {
-          method: 'POST',
-          body: formData,
-        });
-
-        const { data, error } = await response.json();
-        if (error) throw new Error(error);
-
-        setAssets((prev) => [...prev, data]);
-      } catch (error) {
-        console.error('Failed to upload file:', error);
-      }
-    }
-  };
-
-  const handleRemoveAsset = async (assetId: string) => {
-    // In a real app, implement asset removal
-    setAssets((prev) => prev.filter((a) => a.id !== assetId));
-  };
-
-  const handleAddRelation = async (relation: Omit<KeywordRelation, 'id' | 'created_at'>) => {
-    try {
-      const response = await fetch('/api/relations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(relation),
-      });
-
-      const { data, error } = await response.json();
-      if (error) throw new Error(error);
-
-      setRelations((prev) => [...prev, data]);
-    } catch (error) {
-      console.error('Failed to add relation:', error);
-    }
-  };
-
-  const handleRemoveRelation = async (relationId: string) => {
-    try {
-      const response = await fetch(`/api/relations?id=${relationId}`, {
-        method: 'DELETE',
-      });
-
-      const { error } = await response.json();
-      if (error) throw new Error(error);
-
-      setRelations((prev) => prev.filter((r) => r.id !== relationId));
-    } catch (error) {
-      console.error('Failed to remove relation:', error);
-    }
-  };
-
-  const sortedKeywords = React.useMemo(
-    () => [...keywords].sort((a, b) => a.sort_order - b.sort_order || a.title.localeCompare(b.title)),
-    [keywords]
-  );
-
-  const childrenByParent = React.useMemo(() => {
+  const childrenByParent = useMemo(() => {
     const map = new Map<string | null, Keyword[]>();
-    for (const keyword of sortedKeywords) {
+    const sorted = [...keywords].sort(
+      (a, b) => a.sort_order - b.sort_order || a.title.localeCompare(b.title)
+    );
+    for (const keyword of sorted) {
       const key = keyword.parent_id ?? null;
       const arr = map.get(key) ?? [];
       arr.push(keyword);
       map.set(key, arr);
     }
     return map;
-  }, [sortedKeywords]);
+  }, [keywords]);
 
-  const roots = React.useMemo(() => childrenByParent.get(null) ?? [], [childrenByParent]);
+  const current = currentId ? byId.get(currentId) ?? null : null;
+  const list = childrenByParent.get(current?.id ?? null) ?? [];
 
-  const selectedPath = React.useMemo(() => {
-    if (!selectedKeyword) return [] as Keyword[];
-    const byId = new Map(sortedKeywords.map((k) => [k.id, k] as const));
-    const path: Keyword[] = [];
-    let cursor: Keyword | undefined = byId.get(selectedKeyword.id);
-    let guard = 0;
-    while (cursor && guard < 100) {
-      path.unshift(cursor);
-      cursor = cursor.parent_id ? byId.get(cursor.parent_id) : undefined;
-      guard += 1;
-    }
-    return path;
-  }, [selectedKeyword, sortedKeywords]);
-
-  useEffect(() => {
-    const pathIds = selectedPath.map((k) => k.id);
-    setChatScopeKeywordIds(pathIds);
-  }, [selectedPath]);
-
-  const flowColumns = React.useMemo(() => {
-    const columns: Array<{ title: string; items: Keyword[]; activeId: string | null }> = [];
-    columns.push({ title: 'Root', items: roots, activeId: selectedPath[0]?.id ?? null });
-
-    for (let i = 0; i < selectedPath.length; i += 1) {
-      const parent = selectedPath[i];
-      const kids = childrenByParent.get(parent.id) ?? [];
-      if (kids.length > 0) {
-        columns.push({
-          title: i === 0 ? `${parent.title} branches` : `Level ${i + 1}`,
-          items: kids,
-          activeId: selectedPath[i + 1]?.id ?? null,
-        });
+  // Chain from root down to the current keyword (for AI context + search subtitles)
+  const pathOf = useCallback(
+    (id: string): Keyword[] => {
+      const path: Keyword[] = [];
+      let cursor = byId.get(id);
+      let guard = 0;
+      while (cursor && guard < 100) {
+        path.unshift(cursor);
+        cursor = cursor.parent_id ? byId.get(cursor.parent_id) : undefined;
+        guard += 1;
       }
-    }
-
-    return columns;
-  }, [childrenByParent, roots, selectedPath]);
-
-  const searchResults = React.useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    if (!q) return [] as Keyword[];
-    return sortedKeywords
-      .filter((k) => k.title.toLowerCase().includes(q) || k.definition?.toLowerCase().includes(q))
-      .slice(0, 30);
-  }, [searchQuery, sortedKeywords]);
-
-  const selectedChildren = React.useMemo(
-    () => (selectedKeyword ? childrenByParent.get(selectedKeyword.id) ?? [] : []),
-    [selectedKeyword, childrenByParent]
+      return path;
+    },
+    [byId]
   );
 
-  const overlayOpen = Boolean(isNewKeyword || (selectedKeyword && selectedChildren.length === 0));
-
-  const handleQuickAttach = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    await handleUploadFiles(Array.from(files));
-  };
-
-  const handleSendUploadNote = async () => {
-    if (!selectedKeyword || !uploadNote.trim()) return;
-    const safeTitle = selectedKeyword.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'keyword';
-    const file = new File([uploadNote.trim()], `${safeTitle}-note-${Date.now()}.txt`, { type: 'text/plain' });
-    await handleUploadFiles([file]);
-    setUploadNote('');
-  };
+  const currentPath = useMemo(() => (currentId ? pathOf(currentId) : []), [currentId, pathOf]);
 
   useEffect(() => {
-    if (!(selectedKeyword || isNewKeyword)) return;
-    workspaceRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }, [selectedKeyword?.id, isNewKeyword, viewMode]);
+    setChatScopeIds(currentPath.map((k) => k.id));
+  }, [currentPath]);
+
+  const openKeyword = useCallback((keyword: Keyword) => {
+    setDirection('fwd');
+    setCurrentId(keyword.id);
+    setSearchQuery('');
+  }, []);
+
+  const goBack = useCallback(() => {
+    setDirection('back');
+    setCurrentId(current?.parent_id ?? null);
+  }, [current?.parent_id]);
+
+  const handleQuickAdd = async () => {
+    const title = draft.trim();
+    if (!title || creating) return;
+    setCreating(true);
+    try {
+      const response = await fetch('/api/keywords', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, parent_id: current?.id ?? null }),
+      });
+      const { data, error } = await response.json();
+      if (error) throw new Error(error);
+      setKeywords((prev) => [...prev, data]);
+      setDraft('');
+    } catch (error) {
+      console.error('Failed to create keyword:', error);
+      showToast('Konnte nicht erstellt werden · Could not create');
+    } finally {
+      setCreating(false);
+      quickAddRef.current?.focus();
+    }
+  };
+
+  const handleSaveKeyword = async (keywordData: Partial<Keyword>) => {
+    if (!editing) return;
+    try {
+      const response = await fetch(`/api/keywords/${editing.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(keywordData),
+      });
+      const { data, error } = await response.json();
+      if (error) throw new Error(error);
+      setKeywords((prev) => prev.map((k) => (k.id === data.id ? { ...k, ...data } : k)));
+      setEditing(null);
+    } catch (error) {
+      console.error('Failed to save keyword:', error);
+      showToast('Speichern fehlgeschlagen · Could not save');
+    }
+  };
+
+  const handleDeleteKeyword = async (id: string) => {
+    if (!confirm('Diesen Begriff wirklich löschen? · Delete this keyword?')) return;
+    try {
+      const response = await fetch(`/api/keywords/${id}`, { method: 'DELETE' });
+      const { error } = await response.json();
+      if (error) throw new Error(error);
+      const deleted = byId.get(id);
+      setKeywords((prev) => prev.filter((k) => k.id !== id));
+      setEditing(null);
+      if (currentId === id) {
+        setDirection('back');
+        setCurrentId(deleted?.parent_id ?? null);
+      }
+    } catch (error) {
+      console.error('Failed to delete keyword:', error);
+      showToast('Löschen fehlgeschlagen · Could not delete');
+    }
+  };
+
+  const searchResults = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return [] as Keyword[];
+    return keywords
+      .filter(
+        (k) =>
+          k.title.toLowerCase().includes(q) ||
+          k.definition?.toLowerCase().includes(q) ||
+          k.synonyms?.some((s) => s.toLowerCase().includes(q))
+      )
+      .slice(0, 30);
+  }, [searchQuery, keywords]);
+
+  const searching = searchQuery.trim().length > 0;
+  const parentTitle = current?.parent_id
+    ? byId.get(current.parent_id)?.title ?? 'Zurück'
+    : 'Begriffe';
+
+  /** One list row — big tap target, title + optional definition snippet, child count, chevron. */
+  const renderRow = (kw: Keyword, subtitle?: string) => {
+    const childCount = childrenByParent.get(kw.id)?.length ?? 0;
+    return (
+      <button
+        key={kw.id}
+        onClick={() => openKeyword(kw)}
+        className={`w-full flex items-center gap-3 px-4 py-3.5 text-left transition-colors active:bg-slate-100 hover:bg-slate-50 ${
+          kw.status === 'archived' ? 'opacity-50' : ''
+        }`}
+      >
+        <span
+          className={`w-2 h-2 rounded-full shrink-0 ${completenessDot(kw.completeness_score)}`}
+          aria-hidden
+        />
+        <span className="flex-1 min-w-0">
+          <span className="block text-[15px] font-medium text-slate-900 truncate">{kw.title}</span>
+          {(subtitle ?? kw.definition) && (
+            <span className="block text-[13px] text-slate-400 truncate mt-0.5">
+              {subtitle ?? kw.definition}
+            </span>
+          )}
+        </span>
+        {childCount > 0 && (
+          <span className="text-[13px] text-slate-400 tabular-nums shrink-0">{childCount}</span>
+        )}
+        <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" />
+      </button>
+    );
+  };
 
   return (
     <div className="text-slate-900 font-sans selection:bg-blue-100 selection:text-blue-900">
-      <main className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-        {/* Page header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Keyword Map</h1>
-            <p className="text-sm text-slate-500 mt-1">
-              Your company ontology — concepts, definitions, and evidence.
+      <main className="max-w-2xl mx-auto px-4 sm:px-6 py-6 sm:py-10 pb-32">
+        {/* Header */}
+        <header className="mb-5">
+          {current ? (
+            <button
+              onClick={goBack}
+              className="flex items-center gap-0.5 -ml-2 mb-1 px-1 py-1 text-[15px] font-medium text-blue-600 rounded-lg active:opacity-50 transition-opacity"
+            >
+              <ChevronLeft className="w-5 h-5" />
+              {parentTitle}
+            </button>
+          ) : null}
+          <div className="flex items-end justify-between gap-3">
+            <h1 className="text-[28px] sm:text-[32px] font-bold tracking-tight leading-tight">
+              {current ? current.title : 'Begriffe'}
+            </h1>
+            {!current && <ImportExportMenu onImported={fetchKeywords} />}
+          </div>
+          {!current && (
+            <p className="text-[15px] text-slate-500 mt-1">
+              Das gemeinsame Wörterbuch eurer Firma · Your company&apos;s shared dictionary
             </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <div className="hidden md:flex items-center gap-2 text-xs font-medium text-slate-500 bg-slate-100/80 px-3 py-1.5 rounded-full border border-slate-200/50">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-              {keywords.length} keywords indexed
-            </div>
-            <ImportExportMenu onImported={fetchKeywords} />
-          </div>
-        </div>
-        {/* Action Bar */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 bg-white p-2 rounded-2xl shadow-sm border border-slate-200/60">
-          <div className="relative w-full sm:max-w-md group">
-            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-              <Search className="w-4 h-4 text-slate-400 group-focus-within:text-blue-500 transition-colors" />
-            </div>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search keywords, definitions..."
-              className="w-full pl-10 pr-4 py-3 text-sm bg-transparent border-none focus:ring-0 text-slate-900 placeholder-slate-400 transition-all"
-            />
-            {searchQuery && (
-              <button 
-                onClick={() => setSearchQuery('')}
-                className="absolute inset-y-0 right-0 pr-4 flex items-center text-slate-400 hover:text-slate-600"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            )}
-          </div>
-          
-          <div className="flex items-center gap-2 w-full sm:w-auto px-2 sm:px-0 pb-2 sm:pb-0">
+          )}
+        </header>
+
+        {/* Search */}
+        <div className="relative mb-6">
+          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Suchen · Search"
+            className="w-full pl-10 pr-10 py-2.5 text-[15px] rounded-xl bg-slate-200/60 border-none placeholder-slate-400 focus:bg-white focus:ring-2 focus:ring-blue-500 transition-all"
+          />
+          {searchQuery && (
             <button
-              onClick={() => setShowMissingOnly((v) => !v)}
-              className={`flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 ${
-                showMissingOnly
-                  ? 'bg-amber-100 text-amber-800 ring-1 ring-amber-300'
-                  : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
-              }`}
-              title="Show keywords without a definition"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600 rounded-full"
+              aria-label="Suche löschen"
             >
-              <span className={`w-2 h-2 rounded-full ${showMissingOnly ? 'bg-amber-500' : 'bg-red-400'}`} />
-              Missing definitions
+              <X className="w-4 h-4" />
             </button>
-            <div className="h-8 w-px bg-slate-200 hidden sm:block mx-2"></div>
-            <button
-              onClick={() => handleAddChild(null)}
-              className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium bg-slate-900 text-white hover:bg-slate-800 hover:shadow-md hover:shadow-slate-900/10 active:scale-[0.98] transition-all duration-200"
-            >
-              <Plus className="w-4 h-4" />
-              New Root
-            </button>
-            {selectedKeyword && (
-              <button
-                onClick={() => handleAddChild(selectedKeyword.id)}
-                className="flex-1 sm:flex-none inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-slate-300 active:scale-[0.98] transition-all duration-200"
-              >
-                <Plus className="w-4 h-4" />
-                Add Branch
-              </button>
-            )}
-          </div>
+          )}
         </div>
 
-        {showMissingOnly ? (
-          <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div className="flex items-center justify-between mb-4 px-1">
-              <h2 className="text-sm font-semibold text-slate-700">Keywords without a definition</h2>
-              <span className="text-xs text-slate-500">
-                {sortedKeywords.filter((k) => !k.definition?.trim()).length} found
-              </span>
-            </div>
-            {sortedKeywords.filter((k) => !k.definition?.trim()).length === 0 ? (
-              <div className="bg-white rounded-3xl p-12 text-center border border-slate-200 border-dashed">
-                <p className="text-slate-500 font-medium">Every keyword has a definition. 🎉</p>
-              </div>
-            ) : (
-              <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {sortedKeywords
-                  .filter((k) => !k.definition?.trim())
-                  .map((kw) => (
-                    <button
-                      key={kw.id}
-                      onClick={() => router.push(`/keywords/${kw.id}`)}
-                      className="group text-left p-5 rounded-2xl bg-white border border-amber-200 hover:border-amber-400 hover:shadow-lg transition-all duration-300"
-                    >
-                      <div className="flex items-center gap-2">
-                        <span className={`w-2 h-2 rounded-full ${completenessDot(kw.completeness_score)}`} />
-                        <span className="font-semibold text-slate-900 group-hover:text-amber-700 transition-colors">
-                          {kw.title}
-                        </span>
-                      </div>
-                      <div className="text-xs text-amber-600 font-medium mt-2">Add a definition →</div>
-                    </button>
-                  ))}
-              </div>
-            )}
-          </section>
-        ) : searchQuery.trim() ? (
-          <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div className="flex items-center justify-between mb-4 px-1">
-              <h2 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-                <Search className="w-4 h-4 text-slate-400" />
-                Search Results
-              </h2>
-              <span className="text-xs text-slate-500">{searchResults.length} found</span>
-            </div>
+        {isLoading ? (
+          <div className="flex flex-col items-center justify-center py-24 text-slate-400">
+            <Loader2 className="w-6 h-6 animate-spin mb-3" />
+            <p className="text-sm">Wird geladen…</p>
+          </div>
+        ) : searching ? (
+          /* ——— Search results ——— */
+          <section className="anim-fade-up">
             {searchResults.length === 0 ? (
-              <div className="bg-white rounded-3xl p-12 text-center border border-slate-200 border-dashed">
-                <div className="w-12 h-12 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-3">
-                  <Search className="w-6 h-6 text-slate-300" />
-                </div>
-                <p className="text-slate-500 font-medium">No keywords found matching "{searchQuery}"</p>
-                <p className="text-sm text-slate-400 mt-1">Try adjusting your search terms</p>
+              <div className="py-20 text-center">
+                <p className="text-[15px] font-medium text-slate-500">
+                  Nichts gefunden für „{searchQuery}“
+                </p>
+                <p className="text-[13px] text-slate-400 mt-1">No results · Try another word</p>
               </div>
             ) : (
-              <div className="grid sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {searchResults.map((kw) => (
-                  <button
-                    key={kw.id}
-                    onClick={() => {
-                      handleSelectKeyword(kw);
-                      setSearchQuery('');
-                    }}
-                    className="group text-left p-5 rounded-2xl bg-white border border-slate-200 hover:border-blue-300 hover:shadow-lg hover:shadow-blue-500/5 transition-all duration-300 flex flex-col h-full"
-                  >
-                    <div className="font-semibold text-slate-900 group-hover:text-blue-600 transition-colors">{kw.title}</div>
-                    <div className="text-sm text-slate-500 mt-2 line-clamp-2 flex-grow">{kw.definition || 'No definition provided.'}</div>
-                    <div className="mt-4 flex items-center gap-2 text-xs text-slate-400 font-medium">
-                      <span className="flex items-center gap-1"><Link2 className="w-3 h-3" /> {kw.relations?.length || 0}</span>
-                      <span className="flex items-center gap-1"><Paperclip className="w-3 h-3" /> {kw.assets?.length || 0}</span>
-                    </div>
-                  </button>
-                ))}
+              <div className="bg-white rounded-2xl shadow-sm ring-1 ring-black/5 divide-y divide-slate-100 overflow-hidden">
+                {searchResults.map((kw) => {
+                  const crumbs = pathOf(kw.id)
+                    .slice(0, -1)
+                    .map((p) => p.title)
+                    .join(' › ');
+                  return renderRow(kw, crumbs || kw.definition || undefined);
+                })}
               </div>
             )}
           </section>
         ) : (
-          <section className="relative">
-            <div className="flex items-center gap-2 mb-4 px-1 text-sm text-slate-500 font-medium">
-              <FolderTree className="w-4 h-4 text-slate-400" />
-              <span>Ontology Explorer</span>
-            </div>
-            
-            {isLoading ? (
-              <div className="flex flex-col items-center justify-center h-64 bg-white rounded-3xl border border-slate-200 border-dashed">
-                <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin mb-4" />
-                <p className="text-sm text-slate-500 font-medium animate-pulse">Loading knowledge graph...</p>
-              </div>
-            ) : (
-              <div className="relative bg-slate-50/50 rounded-3xl p-2 border border-slate-200/60">
-                <div className="overflow-x-auto pb-4 pt-2 px-2 snap-x snap-mandatory hide-scrollbar">
-                  <div className="flex gap-4 min-w-max items-start">
-                    {flowColumns.map((col, idx) => (
-                      <div 
-                        key={`${col.title}-${idx}`} 
-                        className="w-80 shrink-0 snap-start flex flex-col bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden animate-in slide-in-from-right-4 duration-300"
-                        style={{ animationDelay: `${idx * 50}ms`, animationFillMode: 'both' }}
-                      >
-                        <div className="px-4 py-3 bg-slate-50/80 border-b border-slate-100 flex items-center justify-between sticky top-0 z-10 backdrop-blur-sm">
-                          <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">{col.title}</span>
-                          <span className="text-xs font-medium text-slate-400 bg-white px-2 py-0.5 rounded-full border border-slate-200">{col.items.length}</span>
-                        </div>
-                        <div className="p-2 space-y-1 max-h-[450px] overflow-y-auto custom-scrollbar">
-                          {col.items.map((kw) => {
-                            const active = col.activeId === kw.id;
-                            const isSelected = selectedKeyword?.id === kw.id;
-                            return (
-                              <button
-                                key={kw.id}
-                                onClick={() => handleSelectKeyword(kw)}
-                                className={`w-full text-left rounded-xl px-4 py-3 text-sm font-medium transition-all duration-200 group flex items-center justify-between ${
-                                  active || isSelected
-                                    ? 'bg-blue-50 text-blue-700 shadow-sm ring-1 ring-blue-200/50'
-                                    : 'bg-transparent text-slate-700 hover:bg-slate-50 hover:text-slate-900'
-                                } ${kw.status === 'archived' ? 'opacity-50' : ''}`}
-                              >
-                                <span className="flex items-center gap-2 min-w-0">
-                                  <span
-                                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${completenessDot(kw.completeness_score)}`}
-                                    title={`Completeness: ${kw.completeness_score ?? 0}%`}
-                                  />
-                                  <span className="truncate pr-1">{kw.title}</span>
-                                  {kw.status === 'draft' && (
-                                    <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 text-[9px] font-bold uppercase shrink-0">
-                                      draft
-                                    </span>
-                                  )}
-                                </span>
-                                <span className="flex items-center gap-1 shrink-0">
-                                  <span
-                                    role="button"
-                                    tabIndex={0}
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      router.push(`/keywords/${kw.id}`);
-                                    }}
-                                    className="p-1 rounded-md text-slate-300 opacity-0 group-hover:opacity-100 hover:text-blue-600 hover:bg-blue-50 transition-all"
-                                    title="Open full page"
-                                  >
-                                    <Edit3 className="w-3.5 h-3.5" />
-                                  </span>
-                                  {(active || isSelected) && <ChevronRight className="w-4 h-4 text-blue-500" />}
-                                </span>
-                              </button>
-                            );
-                          })}
-                          {col.items.length === 0 && (
-                            <div className="px-4 py-8 text-center flex flex-col items-center justify-center">
-                              <div className="w-8 h-8 bg-slate-50 rounded-full flex items-center justify-center mb-2">
-                                <Database className="w-4 h-4 text-slate-300" />
-                              </div>
-                              <p className="text-xs text-slate-400 font-medium">Empty branch</p>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                
-                {/* Fade edges for scroll indication */}
-                <div className="absolute top-0 right-0 bottom-0 w-8 bg-gradient-to-l from-slate-50/50 to-transparent pointer-events-none rounded-r-3xl"></div>
+          /* ——— Drill-down list ——— */
+          <section key={current?.id ?? 'root'} className={direction === 'fwd' ? 'anim-page-fwd' : 'anim-page-back'}>
+            {/* Current keyword: definition + details, one grouped card */}
+            {current && (
+              <div className="bg-white rounded-2xl shadow-sm ring-1 ring-black/5 divide-y divide-slate-100 overflow-hidden mb-6">
+                <button
+                  onClick={() => setEditing(current)}
+                  className="w-full flex items-start gap-3 px-4 py-3.5 text-left transition-colors active:bg-slate-100 hover:bg-slate-50"
+                >
+                  <span className="flex-1 min-w-0">
+                    {current.definition ? (
+                      <span className="block text-[15px] text-slate-700 leading-relaxed">
+                        {current.definition}
+                      </span>
+                    ) : (
+                      <span className="block text-[15px] text-blue-600 font-medium">
+                        Definition hinzufügen · Add definition
+                      </span>
+                    )}
+                  </span>
+                  <Pencil className="w-4 h-4 text-slate-300 shrink-0 mt-1" />
+                </button>
+                <button
+                  onClick={() => router.push(`/keywords/${current.id}`)}
+                  className="w-full flex items-center gap-3 px-4 py-3 text-left transition-colors active:bg-slate-100 hover:bg-slate-50"
+                >
+                  <Paperclip className="w-4 h-4 text-slate-400 shrink-0" />
+                  <span className="flex-1 text-[15px] text-slate-700">
+                    Dateien & Details
+                    <span className="text-slate-400 ml-1.5 text-[13px]">Files &amp; details</span>
+                  </span>
+                  <ChevronRight className="w-4 h-4 text-slate-300 shrink-0" />
+                </button>
               </div>
             )}
-          </section>
-        )}
 
-        {!selectedKeyword && !isNewKeyword ? (
-          <div
-            ref={workspaceRef}
-            className="mt-8 bg-white rounded-3xl p-8 md:p-16 border border-slate-200 shadow-sm text-center max-w-3xl mx-auto animate-in fade-in zoom-in-95 duration-500"
-          >
-            <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-blue-50 text-blue-500 mb-6 shadow-inner">
-              <Database className="w-10 h-10" />
-            </div>
-            <h3 className="text-2xl font-bold text-slate-900 mb-3 tracking-tight">
-              Build Your Knowledge Graph
-            </h3>
-            <p className="text-slate-500 text-lg mb-8 max-w-lg mx-auto leading-relaxed">
-              Select a node from the explorer above to view its details, or create a new root concept to expand your ontology.
+            {/* Section label */}
+            <p className="px-4 mb-2 text-[12px] font-semibold text-slate-400 uppercase tracking-wide">
+              {current ? 'Unterbegriffe · Sub-topics' : 'Alle Begriffe · All keywords'}
             </p>
-            <button
-              onClick={() => handleAddChild(null)}
-              className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white font-medium rounded-xl hover:bg-blue-700 hover:shadow-lg hover:shadow-blue-600/20 active:scale-95 transition-all duration-200"
-            >
-              <Plus className="w-5 h-5" />
-              Create Root Concept
-            </button>
-          </div>
-        ) : null}
 
-        {selectedKeyword && !isNewKeyword && selectedChildren.length > 0 && !overlayOpen && (
-          <section className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm animate-in fade-in slide-in-from-bottom-4">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-                  <FolderTree className="w-4 h-4 text-slate-400" />
-                  Sub-concepts of "{selectedKeyword.title}"
-                </h3>
+            {/* Children + quick add, one grouped card */}
+            <div className="bg-white rounded-2xl shadow-sm ring-1 ring-black/5 divide-y divide-slate-100 overflow-hidden">
+              {list.map((kw) => renderRow(kw))}
+
+              {list.length === 0 && !current && (
+                <div className="px-4 py-14 text-center">
+                  <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-blue-50 text-blue-500 mb-3">
+                    <BookOpen className="w-6 h-6" />
+                  </div>
+                  <p className="text-[15px] font-medium text-slate-700">Noch keine Begriffe</p>
+                  <p className="text-[13px] text-slate-400 mt-1">
+                    Tippe unten einen Namen ein und drücke Enter.
+                    <br />
+                    Type a name below and press Enter.
+                  </p>
+                </div>
+              )}
+
+              {/* Quick add — always there, creates on Enter */}
+              <div className="flex items-center gap-3 px-4 py-3">
+                {creating ? (
+                  <Loader2 className="w-5 h-5 text-blue-600 animate-spin shrink-0" />
+                ) : (
+                  <Plus className="w-5 h-5 text-blue-600 shrink-0" />
+                )}
+                <input
+                  ref={quickAddRef}
+                  type="text"
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      handleQuickAdd();
+                    }
+                  }}
+                  placeholder={current ? 'Neuer Unterbegriff… · New sub-topic' : 'Neuer Begriff… · New keyword'}
+                  className="flex-1 min-w-0 text-[15px] bg-transparent border-none outline-none focus:outline-none focus:ring-0 p-0 placeholder-slate-400"
+                />
+                {draft.trim() && (
+                  <button
+                    onClick={handleQuickAdd}
+                    disabled={creating}
+                    className="text-[15px] font-semibold text-blue-600 active:opacity-50 disabled:opacity-40 shrink-0"
+                  >
+                    Hinzufügen
+                  </button>
+                )}
               </div>
             </div>
-            <div className="flex flex-wrap gap-2">
-              {selectedChildren.map((child) => (
-                <button
-                  key={child.id}
-                  onClick={() => handleSelectKeyword(child)}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-white hover:border-blue-300 hover:text-blue-600 hover:shadow-sm text-sm font-medium text-slate-700 transition-all duration-200"
-                >
-                  {child.title}
-                  <ChevronRight className="w-3 h-3 opacity-50" />
-                </button>
-              ))}
-            </div>
+
+            {current && list.length === 0 && (
+              <p className="px-4 mt-3 text-[13px] text-slate-400">
+                Tipp: Enter drücken, um mehrere nacheinander anzulegen. · Press Enter to add several in a row.
+              </p>
+            )}
           </section>
         )}
+      </main>
 
-        {overlayOpen && (
-          <div className="fixed inset-0 z-50">
-            <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200" onClick={handleCloseDetail} />
-            <div className="absolute left-1/2 top-1/2 w-[min(1100px,92vw)] h-[min(85vh,850px)] -translate-x-1/2 -translate-y-1/2 rounded-3xl border border-slate-200 bg-white shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-300">
-              <div className="px-6 py-4 border-b border-slate-100 bg-slate-50/50 flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center shadow-sm">
-                    {isNewKeyword ? <Plus className="w-5 h-5" /> : <Database className="w-5 h-5" />}
-                  </div>
-                  <div>
-                    <h3 className="text-lg font-bold text-slate-800 tracking-tight">
-                      {isNewKeyword ? 'Create New Concept' : selectedKeyword?.title || 'Concept Details'}
-                    </h3>
-                    <p className="text-xs text-slate-500 font-medium">Manage properties, files, and relationships</p>
-                  </div>
+      {/* Edit sheet */}
+      {editing && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+          <div className="absolute inset-0 bg-black/30 anim-fade" onClick={() => setEditing(null)} />
+          <div className="relative w-full sm:w-[min(680px,92vw)] h-[90dvh] sm:h-[min(85vh,780px)] bg-white rounded-t-[28px] sm:rounded-[28px] shadow-2xl overflow-hidden flex flex-col anim-sheet">
+            <div className="sm:hidden pt-2.5 pb-1 flex justify-center shrink-0" aria-hidden>
+              <div className="w-10 h-1 rounded-full bg-slate-200" />
+            </div>
+            <KeywordDetail
+              keyword={editing}
+              allKeywords={keywords}
+              onSave={handleSaveKeyword}
+              onDelete={handleDeleteKeyword}
+              onClose={() => setEditing(null)}
+              isNew={false}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Toast */}
+      {toast && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-[70] px-4 py-2.5 rounded-full bg-slate-900 text-white text-sm shadow-lg anim-fade-up">
+          {toast}
+        </div>
+      )}
+
+      {/* AI assistant (hidden while the edit sheet is open) */}
+      <div className={`fixed right-5 bottom-5 z-40 flex flex-col items-end gap-3 ${editing ? 'hidden' : ''}`}>
+        {aiOpen && (
+          <div className="w-[min(420px,calc(100vw-2.5rem))] h-[min(65vh,600px)] rounded-3xl bg-white shadow-2xl ring-1 ring-black/5 overflow-hidden flex flex-col anim-fade-up">
+            <div className="px-5 py-3.5 border-b border-slate-100 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center">
+                  <Sparkles className="w-3.5 h-3.5" />
                 </div>
-                <div className="flex items-center gap-3">
-                  {selectedKeyword && !isNewKeyword && (
-                    <button
-                      onClick={() => router.push(`/keywords/${selectedKeyword.id}`)}
-                      className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-xl border border-blue-200 text-blue-600 bg-blue-50 hover:bg-blue-100 hover:border-blue-300 transition-colors font-medium"
-                    >
-                      <Edit3 className="w-4 h-4" />
-                      <span className="hidden sm:inline">Full page</span>
-                    </button>
-                  )}
-                  {selectedKeyword && !isNewKeyword && (
-                    <button
-                      onClick={() => handleDeleteKeyword(selectedKeyword.id)}
-                      className="flex items-center gap-1.5 text-sm px-3 py-2 rounded-xl border border-red-200 text-red-600 bg-red-50 hover:bg-red-100 hover:border-red-300 transition-colors font-medium"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                      <span className="hidden sm:inline">Delete</span>
-                    </button>
-                  )}
-                  <div className="w-px h-6 bg-slate-200 mx-1"></div>
-                  <button 
-                    onClick={handleCloseDetail} 
-                    className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
-                  >
-                    <X className="w-5 h-5" />
-                  </button>
-                </div>
+                <h3 className="text-sm font-semibold text-slate-800">Assistent</h3>
               </div>
-
-              <div className="px-6 py-3 border-b border-slate-100 bg-white shrink-0">
-                <div className="flex gap-2 overflow-x-auto hide-scrollbar">
-                  {[
-                    { id: 'edit', label: 'Properties', icon: Edit3 },
-                    { id: 'upload', label: 'Files & Media', icon: FileUp },
-                    { id: 'relations', label: 'Relationships', icon: Link2 },
-                  ].map((tab) => (
-                    <button
-                      key={tab.id}
-                      onClick={() => setViewMode(tab.id as ViewMode)}
-                      className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all whitespace-nowrap ${
-                        viewMode === tab.id
-                          ? 'bg-blue-50 text-blue-700 shadow-sm ring-1 ring-blue-200'
-                          : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900'
-                      }`}
-                    >
-                      <tab.icon className="w-4 h-4" />
-                      {tab.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div ref={workspaceRef} className="flex-1 overflow-y-auto custom-scrollbar p-6 bg-slate-50/30">
-                {viewMode === 'edit' ? (
-                  <div className="max-w-4xl mx-auto bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-                    <KeywordDetail
-                      keyword={isNewKeyword ? null : selectedKeyword}
-                      allKeywords={keywords}
-                      onSave={handleSaveKeyword}
-                      onDelete={handleDeleteKeyword}
-                      onClose={handleCloseDetail}
-                      isNew={isNewKeyword}
-                      parentId={newKeywordParentId}
-                    />
-                  </div>
-                ) : viewMode === 'upload' && selectedKeyword ? (
-                  <div className="max-w-4xl mx-auto space-y-6">
-                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-4 sticky top-0 z-10">
-                      <div className="flex flex-col sm:flex-row gap-3">
-                        <div className="flex-1 relative">
-                          <input
-                            type="text"
-                            value={uploadNote}
-                            onChange={(e) => setUploadNote(e.target.value)}
-                            placeholder="Type a note to attach..."
-                            className="w-full pl-4 pr-12 py-3 text-sm rounded-xl border border-slate-200 bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:border-blue-300 transition-all"
-                          />
-                          <button
-                            onClick={handleSendUploadNote}
-                            disabled={!uploadNote.trim()}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:hover:bg-blue-600 transition-colors"
-                          >
-                            <SendHorizontal className="w-4 h-4" />
-                          </button>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <button
-                            onClick={() => quickImageInputRef.current?.click()}
-                            className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-sm font-medium text-slate-700 transition-colors"
-                          >
-                            <ImagePlus className="w-4 h-4 text-blue-500" /> 
-                            <span className="hidden sm:inline">Photo</span>
-                          </button>
-                          <button
-                            onClick={() => quickFileInputRef.current?.click()}
-                            className="flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-3 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-sm font-medium text-slate-700 transition-colors"
-                          >
-                            <Paperclip className="w-4 h-4 text-indigo-500" /> 
-                            <span className="hidden sm:inline">File</span>
-                          </button>
-                          <div className="flex-none">
-                            <VoiceInput
-                              targetField="example"
-                              onTranscript={(text) => setUploadNote((prev) => (prev ? `${prev} ${text}` : text))}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                      <input
-                        ref={quickImageInputRef}
-                        type="file"
-                        accept="image/*"
-                        multiple
-                        className="hidden"
-                        onChange={(e) => handleQuickAttach(e.target.files)}
-                      />
-                      <input
-                        ref={quickFileInputRef}
-                        type="file"
-                        multiple
-                        className="hidden"
-                        onChange={(e) => handleQuickAttach(e.target.files)}
-                      />
-                    </div>
-
-                    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-                      <FileUpload
-                        keywordId={selectedKeyword.id}
-                        existingAssets={assets}
-                        onUpload={handleUploadFiles}
-                        onRemove={handleRemoveAsset}
-                        onViewAsset={(asset) => openAsset(asset)}
-                      />
-                    </div>
-                  </div>
-                ) : viewMode === 'relations' && selectedKeyword ? (
-                  <div className="max-w-4xl mx-auto bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-                    <RelationEditor
-                      keyword={selectedKeyword}
-                      allKeywords={keywords}
-                      relations={relations}
-                      onAddRelation={handleAddRelation}
-                      onRemoveRelation={handleRemoveRelation}
-                    />
-                  </div>
-                ) : null}
-              </div>
+              <button
+                onClick={() => setAiOpen(false)}
+                className="p-1.5 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+                aria-label="Assistent schließen"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <AIAssistant
+                keywords={keywords}
+                selectedKeywordIds={chatScopeIds}
+                onSelectedKeywordIdsChange={setChatScopeIds}
+                onSelectKeyword={(id) => {
+                  const found = byId.get(id);
+                  if (found) openKeyword(found);
+                }}
+                onKeywordsCreated={fetchKeywords}
+              />
             </div>
           </div>
         )}
-
-        {/* Floating AI Button & Panel */}
-        <div className="fixed right-6 bottom-6 z-[60] flex flex-col items-end gap-4">
-          {aiOpen && (
-            <div className="w-[min(450px,90vw)] h-[min(70vh,650px)] rounded-3xl border border-slate-200 bg-white shadow-2xl overflow-hidden flex flex-col animate-in slide-in-from-bottom-8 duration-300 origin-bottom-right">
-              <div className="px-5 py-4 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 text-white flex items-center justify-center shadow-sm">
-                    <Sparkles className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-800">Ontology AI</h3>
-                    <p className="text-[10px] text-slate-500 font-medium">
-                      {chatScopeKeywordIds.length > 0 ? `${chatScopeKeywordIds.length} concepts in context` : 'Global context'}
-                    </p>
-                  </div>
-                </div>
-                <button
-                  onClick={() => setAiOpen(false)}
-                  className="p-2 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-200/50 transition-colors"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-              <div className="flex-1 overflow-hidden bg-slate-50/30">
-                <AIAssistant
-                  keywords={keywords}
-                  selectedKeywordIds={chatScopeKeywordIds}
-                  onSelectedKeywordIdsChange={setChatScopeKeywordIds}
-                  onSelectKeyword={handleSelectKeywordById}
-                  onKeywordsCreated={fetchKeywords}
-                />
-              </div>
-            </div>
-          )}
-
-          <button
-            onClick={() => setAiOpen((prev) => !prev)}
-            className={`group relative flex items-center justify-center w-14 h-14 rounded-2xl shadow-lg transition-all duration-300 hover:scale-105 active:scale-95 ${
-              aiOpen 
-                ? 'bg-slate-800 text-white shadow-slate-800/20' 
-                : 'bg-gradient-to-br from-indigo-500 to-purple-600 text-white shadow-indigo-500/30'
-            }`}
-            aria-label="Toggle AI assistant"
-          >
-            {aiOpen ? <X className="w-6 h-6" /> : <Sparkles className="w-6 h-6" />}
-            {!aiOpen && (
-              <span className="absolute -top-2 -right-2 flex h-4 w-4">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-purple-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-4 w-4 bg-purple-500 border-2 border-white"></span>
-              </span>
-            )}
-          </button>
-        </div>
-      </main>
+        <button
+          onClick={() => setAiOpen((prev) => !prev)}
+          className={`flex items-center justify-center w-12 h-12 rounded-full shadow-lg transition-all duration-200 active:scale-95 ${
+            aiOpen ? 'bg-slate-800 text-white' : 'bg-blue-600 text-white shadow-blue-600/30'
+          }`}
+          aria-label="KI-Assistent öffnen/schließen"
+        >
+          {aiOpen ? <X className="w-5 h-5" /> : <Sparkles className="w-5 h-5" />}
+        </button>
+      </div>
     </div>
   );
 }
