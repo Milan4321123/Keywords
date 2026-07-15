@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireOrgContext, audit, accessibleLevels, canUseAccessLevel } from '@/lib/auth';
 import { apiError } from '@/lib/api';
 import { recomputeKeywordCompleteness } from '@/lib/ontology/completeness';
+import { keywordPayloadError } from '@/lib/validation';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -67,6 +68,11 @@ export async function PUT(req: NextRequest, { params }: RouteParams) {
     const ctx = await requireOrgContext('edit_keywords');
     const { id } = await params;
     const body = (await req.json()) as Record<string, any>;
+
+    const payloadError = keywordPayloadError(body);
+    if (payloadError) {
+      return NextResponse.json({ data: null, error: payloadError }, { status: 422 });
+    }
 
     // Whitelist: tenancy, identity, and computed fields never come from the payload
     const updates: Record<string, any> = {};

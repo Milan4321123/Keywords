@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireOrgContext, audit, authErrorResponse } from '@/lib/auth';
+import { requireOrgContext, audit } from '@/lib/auth';
+import { apiError } from '@/lib/api';
 import { enforceRateLimit } from '@/lib/rate-limit';
 import { createEmbedding, chatCompletion, rerankChunks } from '@/lib/openai';
 import { buildAIContext, getSystemPrompt, extractPotentialKeywords, rankChunks } from '@/lib/ai-context';
@@ -310,14 +311,6 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(response);
   } catch (error) {
-    const authErr = authErrorResponse(error);
-    if (authErr) {
-      return NextResponse.json({ error: authErr.message }, { status: authErr.status });
-    }
-    console.error('Error in AI ask:', error);
-    return NextResponse.json(
-      { error: 'Failed to process question' },
-      { status: 500 }
-    );
+    return apiError(error, 'Failed to process question');
   }
 }

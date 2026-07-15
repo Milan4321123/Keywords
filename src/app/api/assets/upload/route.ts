@@ -4,6 +4,7 @@ import { enforceRateLimit } from '@/lib/rate-limit';
 import { apiError } from '@/lib/api';
 import { processAsset } from '@/lib/ingestion/process';
 import { recomputeKeywordCompleteness } from '@/lib/ontology/completeness';
+import { fileSizeError } from '@/lib/validation';
 
 // POST /api/assets/upload - Upload files and link to keyword
 export async function POST(req: NextRequest) {
@@ -20,6 +21,12 @@ export async function POST(req: NextRequest) {
         { data: null, error: 'No file provided' },
         { status: 400 }
       );
+    }
+
+    // Bound memory, processing time, and storage cost before reading the file
+    const sizeError = fileSizeError(file);
+    if (sizeError) {
+      return NextResponse.json({ data: null, error: sizeError }, { status: 413 });
     }
 
     // Keyword link must belong to the active organization

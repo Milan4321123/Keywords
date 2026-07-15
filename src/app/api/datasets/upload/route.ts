@@ -3,6 +3,7 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { requireOrgContext, audit, authErrorResponse } from '@/lib/auth';
 import { enforceRateLimit } from '@/lib/rate-limit';
 import { parseWorkbookToDatasetTables } from '@/lib/datasets';
+import { fileSizeError } from '@/lib/validation';
 
 export const runtime = 'nodejs';
 
@@ -38,6 +39,12 @@ export async function POST(req: NextRequest) {
 
     if (!file) {
       return NextResponse.json({ data: null, error: 'No file provided' }, { status: 400 });
+    }
+
+    // Bound memory and parse time before reading the workbook
+    const sizeError = fileSizeError(file);
+    if (sizeError) {
+      return NextResponse.json({ data: null, error: sizeError }, { status: 413 });
     }
 
     const mimeType = file.type;

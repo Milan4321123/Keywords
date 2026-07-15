@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireOrgContext, audit, accessibleLevels, canUseAccessLevel, KeywordAccessLevel } from '@/lib/auth';
 import { apiError } from '@/lib/api';
 import { computeCompleteness } from '@/lib/ontology/completeness';
+import { keywordPayloadError } from '@/lib/validation';
 
 const KEYWORD_TYPES = [
   'concept', 'process', 'metric', 'dataset', 'document_type', 'role',
@@ -43,6 +44,11 @@ export async function POST(req: NextRequest) {
         { data: null, error: 'Title is required' },
         { status: 400 }
       );
+    }
+
+    const payloadError = keywordPayloadError(body);
+    if (payloadError) {
+      return NextResponse.json({ data: null, error: payloadError }, { status: 422 });
     }
 
     const slug = body.title

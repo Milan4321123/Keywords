@@ -1,11 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { transcribeAudio } from '@/lib/openai';
 import { requireOrgContext, authErrorResponse } from '@/lib/auth';
+import { enforceRateLimit } from '@/lib/rate-limit';
+import { fileSizeError, MAX_AUDIO_BYTES } from '@/lib/validation';
 
 // POST /api/transcribe - Transcribe audio to text
 export async function POST(req: NextRequest) {
   try {
-    await requireOrgContext('upload_assets');
+    const ctx = await requireOrgContext('upload_assets');
+    enforceRateLimit('ai', ctx.user.id);
 
     // Check if OpenAI API key is configured
     if (!process.env.OPENAI_API_KEY) {
@@ -27,7 +30,10 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    console.log('Received audio file:', audioFile.name, 'Size:', audioFile.size, 'Type:', audioFile.type);
+    const sizeError = fileSizeError(audioFile, MAX_AUDIO_BYTES);
+    if (sizeError) {
+      return NextResponse.json({ error: sizeError }, { status: 413 });
+    }
 
     // Convert to buffer
     const arrayBuffer = await audioFile.arrayBuffer();
