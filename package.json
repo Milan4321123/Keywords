@@ -11,9 +11,11 @@
     "test": "tsx --test tests/*.test.ts",
     "vault": "tsx scripts/vault-sync.ts",
     "seed:demo": "tsx scripts/seed-demo.ts",
-    "export:finetune": "tsx scripts/export-finetune.ts"
+    "export:finetune": "tsx scripts/export-finetune.ts",
+    "mcp": "tsx scripts/mcp-server.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.45.0",
     "lucide-react": "^0.303.0",
@@ -23,7 +25,8 @@
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "uuid": "^9.0.0",
-    "xlsx": "^0.18.5"
+    "xlsx": "^0.18.5",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",

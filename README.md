@@ -146,6 +146,30 @@ cd vault-bau && claude
 > /loop 30m /insight-loop
 ```
 
+## Zero API Cost: Use Your Claude Subscription (MCP Connector)
+
+You don't need a paid API key to run the AI layer — a normal Claude Pro/Max subscription covers both paths:
+
+**1. Claude Code on the vault (offline snapshot).** `npm run vault`, then `cd vault && claude`. Claude Code is included in the subscription and reads the folder token-efficiently (see above). Best for insights, the background `/insight-loop`, and analysis.
+
+**2. Live MCP connector (real-time data + actions).** `scripts/mcp-server.ts` exposes the organization to Claude Desktop or Claude Code as tools: `list_keywords`, `get_keyword`, `search_keywords`, `get_world_model`, `list_datasets`, `get_dataset_rows` (CSV), and — for doing actual work — `create_keyword` and `update_keyword`. Claude searches your data itself and presses the buttons, exactly like the API-driven assistant, but billed to your flat subscription.
+
+Claude Desktop → Settings → Developer → Edit Config (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "company-brain": {
+      "command": "npx",
+      "args": ["tsx", "/absolute/path/to/keywords/scripts/mcp-server.ts"],
+      "env": { "COMPANY_BRAIN_ORG": "demo-bau" }
+    }
+  }
+}
+```
+
+Claude Code: `claude mcp add company-brain --env COMPANY_BRAIN_ORG=demo-bau -- npx tsx scripts/mcp-server.ts`. The server reads credentials from the project `.env` and runs locally — nothing is exposed to the network. ChatGPT Plus has no local-connector equivalent; there, upload the exported vault folder to a ChatGPT Project instead.
+
 ## Human Feedback & Open-Model Fine-Tuning
 
 The AI improves from human feedback without retraining: every answer in the AI chat has 👍/👎, and a 👎 with a correction becomes **standing guidance** injected into all future answers immediately (run migration `supabase/migrations/0007_ai_feedback.sql` once). Facts always stay in retrieval — the ontology, world model, and vault — so the knowledge is never stale.
