@@ -3,7 +3,7 @@ import { createEmbedding } from '@/lib/openai';
 import { extractPotentialKeywords, rankChunks } from '@/lib/ai-context';
 import { getDependencyContext, DependencyContext } from '@/lib/ontology/graph';
 import { Intent, traversalIntentFor } from './router';
-import { readCachedWorldModel } from './skills';
+import { readCachedWorldModel, readGuidance } from './skills';
 import { Keyword } from '@/types';
 
 export interface DatasetTableSchema {
@@ -271,10 +271,14 @@ export async function buildContext(
   // 6. Render context text (priority: world model → definitions → rules → relations → schemas → documents)
   const parts: string[] = [];
   try {
-    const worldModel = await readCachedWorldModel(ctx);
+    const [worldModel, guidance] = await Promise.all([readCachedWorldModel(ctx), readGuidance(ctx)]);
     if (worldModel?.markdown) {
       parts.push('## Organization World Model (compiled from the company ontology)');
       parts.push(truncate(worldModel.markdown, 3500));
+      parts.push('');
+    }
+    if (guidance) {
+      parts.push(truncate(guidance, 2500));
       parts.push('');
     }
   } catch (error) {

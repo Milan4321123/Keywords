@@ -5,7 +5,7 @@ import { enforceRateLimit } from '@/lib/rate-limit';
 import { createEmbedding, chatCompletion, rerankChunks } from '@/lib/openai';
 import { buildAIContext, getSystemPrompt, extractPotentialKeywords, rankChunks } from '@/lib/ai-context';
 import { getDependencyContext, edgesToRelations } from '@/lib/ontology/graph';
-import { readCachedWorldModel } from '@/lib/ai/skills';
+import { readCachedWorldModel, readGuidance } from '@/lib/ai/skills';
 import { Keyword, KeywordRelation, Chunk, AskAIResponse } from '@/types';
 
 type ChunkWithSimilarity = Chunk & { similarity: number };
@@ -238,9 +238,12 @@ export async function POST(req: NextRequest) {
 
     let worldModelBlock = '';
     try {
-      const worldModel = await readCachedWorldModel(ctx);
+      const [worldModel, guidance] = await Promise.all([readCachedWorldModel(ctx), readGuidance(ctx)]);
       if (worldModel?.markdown) {
         worldModelBlock = `## Organization World Model (compiled from the company ontology)\n${worldModel.markdown.slice(0, 3500)}\n\n`;
+      }
+      if (guidance) {
+        worldModelBlock += `${guidance.slice(0, 2500)}\n\n`;
       }
     } catch (error) {
       console.error('World model unavailable:', error);

@@ -17,6 +17,7 @@ import { Keyword, KeywordRelation } from '@/types';
 
 export const WORLD_MODEL_SKILL_NAME = '__world_model__';
 export const INSIGHTS_SKILL_NAME = '__insights__';
+export const GUIDANCE_SKILL_NAME = '__guidance__';
 
 export interface Ontology {
   keywords: Keyword[];
@@ -213,6 +214,51 @@ export async function getWorldModel(
   });
 
   return model;
+}
+
+/** Read the learned guidance distilled from human feedback (RLHF-light: corrections steer future answers immediately). */
+export async function readGuidance(ctx: OrgContext): Promise<string | null> {
+  const { data } = await ctx.supabase
+    .from('ai_skills')
+    .select('prompt_template')
+    .eq('organization_id', ctx.org.id)
+    .eq('name', GUIDANCE_SKILL_NAME)
+    .maybeSingle();
+  return data?.prompt_template ?? null;
+}
+
+/**
+ * Recompile the guidance skill from the latest human feedback: every
+ * thumbs-down with a correction becomes a standing instruction for future
+ * answers. Deterministic — no LLM call, takes effect on the very next question.
+ */
+export async function recompileGuidance(ctx: OrgContext): Promise<number> {
+  const { data: rows, error } = await ctx.supabase
+    .from('ai_feedback')
+    .select('question, correction, created_at')
+    .eq('organization_id', ctx.org.id)
+    .eq('rating', -1)
+    .not('correction', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(15);
+  if (error) throw error;
+
+  const corrections = (rows ?? []).filter((r) => r.correction?.trim());
+  if (corrections.length === 0) return 0;
+
+  const lines = [
+    '## Learned guidance from human feedback',
+    'Users corrected earlier answers. Apply these corrections — they override generic knowledge:',
+    ...corrections.map((r) => `- Frage: "${r.question.slice(0, 200)}" → Korrektur: ${r.correction!.slice(0, 400)}`),
+  ];
+
+  await writeSkillRow(ctx, GUIDANCE_SKILL_NAME, {
+    description: 'Standing corrections distilled from AI answer feedback',
+    skill_type: 'qa',
+    prompt_template: lines.join('\n'),
+    required_data: { corrections: corrections.length, compiled_at: new Date().toISOString() },
+  });
+  return corrections.length;
 }
 
 /** Insert-or-update a reserved org-level skill row by name (no unique constraint on the table). */

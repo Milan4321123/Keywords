@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts",
     "vault": "tsx scripts/vault-sync.ts",
-    "seed:demo": "tsx scripts/seed-demo.ts"
+    "seed:demo": "tsx scripts/seed-demo.ts",
+    "export:finetune": "tsx scripts/export-finetune.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

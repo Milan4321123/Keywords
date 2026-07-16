@@ -16,7 +16,9 @@ import {
   ChevronDown,
   ChevronUp,
   Wand2,
-  FolderTree
+  FolderTree,
+  ThumbsUp,
+  ThumbsDown
 } from 'lucide-react';
 import { ChatMessage, Keyword, AskAIResponse, KeywordSuggestion } from '@/types';
 
@@ -41,6 +43,10 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({
 }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
+  // Human feedback per assistant message id (+1 / -1 once submitted)
+  const [feedbackGiven, setFeedbackGiven] = useState<Record<string, 1 | -1>>({});
+  const [correctingId, setCorrectingId] = useState<string | null>(null);
+  const [correctionText, setCorrectionText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [internalContextKeywords, setInternalContextKeywords] = useState<string[]>(selectedKeywordIds);
   const [mode, setMode] = useState<'ask' | 'generate'>('ask');
@@ -57,6 +63,32 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({
   }, [messages]);
 
   const contextKeywords = onSelectedKeywordIdsChange ? selectedKeywordIds : internalContextKeywords;
+
+  // Human feedback: thumbs up, or thumbs down with a correction. Corrections
+  // become standing guidance for future answers and fine-tuning data.
+  const sendFeedback = async (msg: ChatMessage, rating: 1 | -1, correction?: string) => {
+    const idx = messages.findIndex((m) => m.id === msg.id);
+    const question =
+      [...messages.slice(0, Math.max(idx, 0))].reverse().find((m) => m.role === 'user')?.content ?? '';
+    setFeedbackGiven((prev) => ({ ...prev, [msg.id]: rating }));
+    setCorrectingId(null);
+    setCorrectionText('');
+    try {
+      await fetch('/api/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          question,
+          answer: msg.content,
+          rating,
+          correction: correction?.trim() || undefined,
+          context_keyword_ids: contextKeywords,
+        }),
+      });
+    } catch (error) {
+      console.error('Failed to send feedback:', error);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -597,6 +629,72 @@ export const AIAssistant: React.FC<AIAssistantProps> = ({
                           </button>
                         ))}
                       </div>
+                    </div>
+                  )}
+
+                  {/* Feedback: 👍 or 👎 + correction */}
+                  {msg.role === 'assistant' && (
+                    <div className="mt-3 pt-2.5 border-t border-slate-100">
+                      {feedbackGiven[msg.id] ? (
+                        <span className="flex items-center gap-1.5 text-xs font-medium text-slate-400">
+                          <Check className="w-3 h-3 text-emerald-500" />
+                          Danke — die KI lernt daraus · Thanks, the AI learns from this
+                        </span>
+                      ) : correctingId === msg.id ? (
+                        <div className="space-y-2">
+                          <textarea
+                            value={correctionText}
+                            onChange={(e) => setCorrectionText(e.target.value)}
+                            placeholder="Wie wäre es richtig? · What should the answer be?"
+                            rows={2}
+                            autoFocus
+                            className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 bg-slate-50 focus:bg-white focus:ring-1 focus:ring-blue-400 resize-none"
+                          />
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => sendFeedback(msg, -1, correctionText)}
+                              className="px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 rounded-lg hover:bg-blue-700 transition-colors"
+                            >
+                              Korrektur senden
+                            </button>
+                            <button
+                              onClick={() => sendFeedback(msg, -1)}
+                              className="px-3 py-1.5 text-xs font-medium text-slate-500 hover:text-slate-700 transition-colors"
+                            >
+                              Nur 👎 senden
+                            </button>
+                            <button
+                              onClick={() => {
+                                setCorrectingId(null);
+                                setCorrectionText('');
+                              }}
+                              className="px-2 py-1.5 text-xs text-slate-400 hover:text-slate-600 transition-colors"
+                            >
+                              Abbrechen
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => sendFeedback(msg, 1)}
+                            title="Hilfreich · Helpful"
+                            className="p-1.5 rounded-lg text-slate-300 hover:text-emerald-600 hover:bg-emerald-50 transition-colors"
+                          >
+                            <ThumbsUp className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setCorrectingId(msg.id);
+                              setCorrectionText('');
+                            }}
+                            title="Falsch — korrigieren · Wrong, correct it"
+                            className="p-1.5 rounded-lg text-slate-300 hover:text-red-500 hover:bg-red-50 transition-colors"
+                          >
+                            <ThumbsDown className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>

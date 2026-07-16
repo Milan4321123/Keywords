@@ -146,6 +146,27 @@ cd vault-bau && claude
 > /loop 30m /insight-loop
 ```
 
+## Human Feedback & Open-Model Fine-Tuning
+
+The AI improves from human feedback without retraining: every answer in the AI chat has 👍/👎, and a 👎 with a correction becomes **standing guidance** injected into all future answers immediately (run migration `supabase/migrations/0007_ai_feedback.sql` once). Facts always stay in retrieval — the ontology, world model, and vault — so the knowledge is never stale.
+
+All feedback also accumulates into a training dataset for open models:
+
+```bash
+npm run export:finetune -- --org demo-bau
+# → finetune/demo-bau/sft.jsonl  (chat-format samples from ontology + 👍 answers)
+# → finetune/demo-bau/dpo.jsonl  (preference pairs from 👎 corrections)
+```
+
+Train a LoRA on Llama/Mistral (unsloth/axolotl instructions are in the exported README), serve it with Ollama, and point the app at it — the whole AI stack runs on any OpenAI-compatible endpoint:
+
+```
+OPENAI_BASE_URL=http://localhost:11434/v1
+OPENAI_CHAT_MODEL=your-finetuned-model
+```
+
+Rule of thumb: fine-tune for tone, format, and company vocabulary once a few hundred feedback pairs exist; never fine-tune for facts.
+
 ## Production Deployment
 
 `npm run build` produces a standalone Next.js server. Three supported paths:

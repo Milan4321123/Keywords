@@ -31,3 +31,4 @@ supabase/.branches/
 supabase/.temp/
 .vercel
 /vault/
+/finetune/
