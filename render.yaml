@@ -1,0 +1,24 @@
+# Render blueprint — deploy with "New +" → "Blueprint" and this repo.
+# Fixes the classic Next-on-Render 502: Render pods set HOSTNAME to the pod
+# name and Next binds to it; forcing 0.0.0.0 keeps the app reachable by the
+# Render proxy.
+services:
+  - type: web
+    name: company-brain
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npx next start -H 0.0.0.0 -p $PORT
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: HOSTNAME
+        value: 0.0.0.0
+      - key: NEXT_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: NEXT_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false

@@ -148,9 +148,10 @@ cd vault-bau && claude
 
 ## Production Deployment
 
-`npm run build` produces a standalone Next.js server. Two supported paths:
+`npm run build` produces a standalone Next.js server. Three supported paths:
 
 - **Vercel:** import the repo, set the four env vars from `.env.example`, deploy.
+- **Render:** use the included `render.yaml` blueprint (New + → Blueprint). If you configure the service manually instead, you **must** add the env var `HOSTNAME=0.0.0.0` (Render pods set `HOSTNAME` to the pod name, Next binds to it, and the proxy answers 502) and use `npx next start -H 0.0.0.0 -p $PORT` as the start command.
 - **Docker:** the included `Dockerfile` builds a hardened standalone image with a `/api/health` healthcheck:
   ```bash
   docker build -t company-brain \
