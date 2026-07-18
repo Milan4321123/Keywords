@@ -16,7 +16,9 @@ import {
   X,
 } from 'lucide-react';
 import { Keyword, Asset } from '@/types';
+import { CaptureFormDef } from '@/lib/capture-types';
 import VoiceInput from '@/components/VoiceInput';
+import CaptureForm from '@/components/CaptureForm';
 import { openAsset } from '@/lib/asset-view';
 
 // Soft tile colors cycled by index so the grid looks lively
@@ -46,6 +48,7 @@ export default function WorkPage() {
   const [note, setNote] = useState('');
   const [uploading, setUploading] = useState<string | null>(null);
   const [savedFlash, setSavedFlash] = useState(false);
+  const [captureForms, setCaptureForms] = useState<CaptureFormDef[]>([]);
 
   const photoRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -72,7 +75,13 @@ export default function WorkPage() {
     setSelected(keyword);
     setNote('');
     setAssets([]);
+    setCaptureForms([]);
     loadAssets(keyword.id);
+    // Structured entry forms derived from datasets linked to this keyword
+    fetch(`/api/capture?keyword_id=${keyword.id}`)
+      .then((r) => r.json())
+      .then(({ data }) => setCaptureForms(data?.forms ?? []))
+      .catch(() => setCaptureForms([]));
   };
 
   const flashSaved = () => {
@@ -151,6 +160,19 @@ export default function WorkPage() {
             </div>
           )}
         </div>
+
+        {/* Structured data entry (Kasse amounts, temperatures, waste …) */}
+        {captureForms.map((form) => (
+          <CaptureForm
+            key={form.dataset_table_id}
+            form={form}
+            keywordId={selected.id}
+            onSaved={() => {
+              setSavedFlash(true);
+              setTimeout(() => setSavedFlash(false), 1800);
+            }}
+          />
+        ))}
 
         {/* Big touch actions */}
         <div className="grid grid-cols-2 gap-3 mb-5">
