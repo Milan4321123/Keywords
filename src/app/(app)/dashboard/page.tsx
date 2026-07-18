@@ -10,8 +10,69 @@ import {
   ArrowRight,
 } from 'lucide-react';
 import { getOrgContextForPage, isWorkerRole } from '@/lib/auth';
+import { computeMetric, MetricDefinition } from '@/lib/metrics/compute';
 
 export const dynamic = 'force-dynamic';
+
+interface KpiCard {
+  id: string;
+  name: string;
+  value: number | null;
+  scope: string;
+  deltaPct: number | null;
+  missing: boolean;
+}
+
+function isoDate(date: Date): string {
+  return date.toISOString().slice(0, 10);
+}
+
+/** This-month vs last-month values for up to 6 catalog metrics. */
+async function computeKpis(supabase: any, orgId: string): Promise<KpiCard[]> {
+  const { data: metrics } = await supabase
+    .from('metrics')
+    .select('*')
+    .eq('organization_id', orgId)
+    .limit(6);
+  if (!metrics || metrics.length === 0) return [];
+
+  const now = new Date();
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const prevStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+  const prevEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0));
+
+  const cards: KpiCard[] = [];
+  for (const metric of metrics as MetricDefinition[]) {
+    try {
+      const hasDate = Boolean(metric.date_column);
+      const current = await computeMetric(supabase, orgId, metric, {
+        mode: 'value',
+        period: hasDate ? { from: isoDate(monthStart), to: isoDate(now) } : undefined,
+      });
+      let deltaPct: number | null = null;
+      if (hasDate && current.value != null) {
+        const previous = await computeMetric(supabase, orgId, metric, {
+          mode: 'value',
+          period: { from: isoDate(prevStart), to: isoDate(prevEnd) },
+        });
+        if (previous.value != null && previous.value !== 0) {
+          deltaPct = Math.round(((current.value - previous.value) / Math.abs(previous.value)) * 1000) / 10;
+        }
+      }
+      cards.push({
+        id: metric.id,
+        name: metric.name,
+        value: current.value,
+        scope: hasDate ? 'diesen Monat · this month' : 'gesamt · all time',
+        deltaPct,
+        missing: current.missing.length > 0,
+      });
+    } catch (error) {
+      console.error('KPI computation failed:', metric.name, error);
+    }
+  }
+  return cards;
+}
 
 export default async function DashboardPage() {
   const ctx = await getOrgContextForPage();
@@ -60,6 +121,7 @@ export default async function DashboardPage() {
     ]);
 
   const openQualityIssues = qualityRes.count ?? 0;
+  const kpis = await computeKpis(supabase, org.id);
 
   const stats = [
     { label: 'Keywords', value: keywordsRes.count ?? 0, icon: FolderTree, href: '/keywords' },
@@ -98,6 +160,50 @@ export default async function DashboardPage() {
             {' '}— review them in the Data Hub before relying on analytics.
           </span>
         </Link>
+      )}
+
+      {/* Live business KPIs from the metric catalog */}
+      {kpis.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-2 px-1">
+            <h2 className="text-sm font-semibold text-slate-700">Insights</h2>
+            <Link href="/metrics" className="text-xs font-medium text-blue-600 hover:text-blue-700">
+              Kennzahlen verwalten · Manage metrics →
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+            {kpis.map((kpi) => (
+              <Link
+                key={kpi.id}
+                href="/metrics"
+                className="bg-white rounded-2xl border border-slate-200 p-4 hover:border-blue-300 transition-colors"
+              >
+                <div className="text-xs font-medium text-slate-500 truncate">{kpi.name}</div>
+                <div className="flex items-baseline gap-2 mt-1">
+                  <span className="text-2xl font-bold text-slate-900">
+                    {kpi.value == null
+                      ? '—'
+                      : kpi.value.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+                  </span>
+                  {kpi.deltaPct != null && (
+                    <span
+                      className={`text-xs font-bold ${
+                        kpi.deltaPct >= 0 ? 'text-emerald-600' : 'text-red-600'
+                      }`}
+                    >
+                      {kpi.deltaPct >= 0 ? '▲' : '▼'} {Math.abs(kpi.deltaPct)}%
+                    </span>
+                  )}
+                </div>
+                <div className="text-[10px] text-slate-400 mt-0.5">
+                  {kpi.scope}
+                  {kpi.deltaPct != null && ' · vs. Vormonat'}
+                  {kpi.missing && ' · ⚠ unvollständig'}
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
       )}
 
       {/* Stats */}
