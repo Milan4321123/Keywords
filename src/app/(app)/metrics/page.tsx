@@ -12,6 +12,7 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import { Keyword } from '@/types';
+import AiMetricDesigner from '@/components/AiMetricDesigner';
 
 interface ColumnInfo {
   normalized_name: string;
@@ -216,6 +217,8 @@ export default function MetricsPage() {
           {error}
         </div>
       )}
+
+      <AiMetricDesigner onCreated={load} />
 
       {showForm && (
         <form onSubmit={createMetric} className="bg-white rounded-2xl border border-slate-200 p-5 grid sm:grid-cols-2 gap-4">
