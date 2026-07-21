@@ -1,9 +1,23 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Database,
+  Table2,
+  Upload,
+  ShieldCheck,
+  Sparkles,
+  Loader2,
+  FolderTree,
+  ChevronDown,
+} from 'lucide-react';
 import { Dataset, DatasetRow, DatasetTable, AnalyticsAskResponse, AnalyticsRecommendationResponse, Keyword } from '@/types';
 import DatasetQualityPanel from '@/components/DatasetQualityPanel';
 import AiTableDesigner from '@/components/AiTableDesigner';
+import KeywordDataWorkspace from '@/components/KeywordDataWorkspace';
+import DataGrid from '@/components/DataGrid';
+
+type HubTab = 'data' | 'quality' | 'ai';
 
 type TableOption = { dataset: Dataset; table: DatasetTable };
 
@@ -41,6 +55,7 @@ export default function AnalyticsPage() {
   const [recommendationResult, setRecommendationResult] = useState<AnalyticsRecommendationResponse | null>(null);
   const [error, setError] = useState<string>('');
   const [evidenceRowsByKey, setEvidenceRowsByKey] = useState<Record<string, DatasetRow[]>>({});
+  const [tab, setTab] = useState<HubTab>('data');
 
   const tableOptions: TableOption[] = useMemo(() => {
     const out: TableOption[] = [];
@@ -51,8 +66,13 @@ export default function AnalyticsPage() {
   }, [datasets]);
 
   const selected = useMemo(() => tableOptions.find((t) => t.table.id === selectedTableId) ?? null, [tableOptions, selectedTableId]);
+  const selectedDatasetKeyword = useMemo(() => {
+    const keywordId = (selected?.dataset as any)?.keyword_id as string | null | undefined;
+    if (!keywordId) return null;
+    return keywords.find((keyword) => keyword.id === keywordId) ?? null;
+  }, [keywords, selected]);
 
-  const loadDatasets = async () => {
+  const loadDatasets = async (preferredTableId?: string) => {
     setError('');
     setIsLoading(true);
     try {
@@ -60,7 +80,9 @@ export default function AnalyticsPage() {
       const json = await res.json();
       if (!res.ok || json.error) throw new Error(json.error || 'Failed to load datasets');
       setDatasets(json.data ?? []);
-      if (!selectedTableId && (json.data?.[0]?.tables?.[0]?.id ?? null)) {
+      if (preferredTableId) {
+        setSelectedTableId(preferredTableId);
+      } else if (!selectedTableId && (json.data?.[0]?.tables?.[0]?.id ?? null)) {
         setSelectedTableId(json.data[0].tables[0].id);
       }
     } catch (e: any) {
@@ -282,35 +304,90 @@ export default function AnalyticsPage() {
     triggerDownload(`dependency_brief_${base}.txt`, lines.join('\n'), 'text/plain;charset=utf-8;');
   };
 
+  const tabs: Array<{ id: HubTab; label: string; icon: React.ComponentType<{ className?: string }> }> = [
+    { id: 'data', label: 'Daten · Data', icon: Table2 },
+    { id: 'quality', label: 'Qualität · Quality', icon: ShieldCheck },
+    { id: 'ai', label: 'KI-Analyse · AI', icon: Sparkles },
+  ];
+
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white border-b">
-        <div className="max-w-6xl mx-auto px-6 py-4">
-          <h1 className="text-lg font-semibold text-gray-900">Data Hub</h1>
-          <p className="text-sm text-gray-500">Grounded answers computed from your uploaded tables</p>
-        </div>
-      </header>
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+          <Database className="w-6 h-6 text-slate-400" />
+          Data Hub
+        </h1>
+        <p className="text-sm text-slate-500 mt-1">
+          Daten ansehen, bearbeiten und berechnen · View, edit and compute your business data.
+        </p>
+      </div>
 
       {error && (
-        <div className="max-w-6xl mx-auto px-6 pt-4">
-          <div className="bg-red-50 border border-red-200 text-red-800 rounded-xl p-3 text-sm">
-            {error.includes('Missing analytics tables') ? (
-              <span>
-                {error} (run <span className="font-mono">supabase/analytics.sql</span> or the DATASETS section in{' '}
-                <span className="font-mono">supabase/schema.sql</span>)
-              </span>
-            ) : (
-              error
-            )}
-          </div>
+        <div className="mb-4 bg-red-50 border border-red-200 text-red-800 rounded-xl p-3 text-sm">
+          {error.includes('Missing analytics tables') ? (
+            <span>
+              {error} (run <span className="font-mono">supabase/setup_complete.sql</span>)
+            </span>
+          ) : (
+            error
+          )}
         </div>
       )}
 
-      <main className="max-w-6xl mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <section className="lg:col-span-1 space-y-6">
-          <div className="bg-white border rounded-xl p-4">
-            <h2 className="font-medium text-gray-800 mb-2">Upload Dataset</h2>
-            <p className="text-sm text-gray-500 mb-3">Upload an Excel/CSV file to create queryable tables.</p>
+      <main className="grid grid-cols-1 lg:grid-cols-[300px,1fr] gap-6 items-start">
+        {/* ——— Sidebar: tables, upload, AI designer ——— */}
+        <section className="space-y-4">
+          <div className="bg-white rounded-2xl border border-slate-200 p-3">
+            <h2 className="px-2 py-1.5 text-xs font-bold text-slate-400 uppercase tracking-wider">
+              Tabellen · Tables
+            </h2>
+            {isLoading ? (
+              <div className="flex justify-center py-6">
+                <Loader2 className="w-5 h-5 text-slate-400 animate-spin" />
+              </div>
+            ) : tableOptions.length === 0 ? (
+              <p className="px-2 py-4 text-sm text-slate-400">
+                Noch keine Tabellen — lade eine Datei hoch oder lass die KI eine anlegen.
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {datasets.map((dataset) =>
+                  (dataset.tables ?? []).length === 0 ? null : (
+                    <div key={dataset.id}>
+                      <div className="px-2 pt-1 pb-1 text-[11px] font-semibold text-slate-500 truncate">
+                        {dataset.title}
+                      </div>
+                      {(dataset.tables ?? []).map((table) => {
+                        const active = table.id === selectedTableId;
+                        return (
+                          <button
+                            key={table.id}
+                            onClick={() => setSelectedTableId(table.id)}
+                            className={`w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-left text-sm transition-colors ${
+                              active
+                                ? 'bg-blue-50 text-blue-700 font-semibold ring-1 ring-blue-200/60'
+                                : 'text-slate-600 hover:bg-slate-50'
+                            }`}
+                          >
+                            <Table2 className={`w-4 h-4 shrink-0 ${active ? 'text-blue-500' : 'text-slate-300'}`} />
+                            <span className="flex-1 truncate">{table.name}</span>
+                            <span className={`text-[10px] tabular-nums ${active ? 'text-blue-400' : 'text-slate-300'}`}>
+                              {table.row_count}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )
+                )}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-2xl border border-slate-200 p-4">
+            <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2 mb-2">
+              <Upload className="w-4 h-4 text-slate-400" /> Datei hochladen · Upload
+            </h2>
             <input
               type="file"
               accept=".xlsx,.xls,.csv"
@@ -320,110 +397,105 @@ export default function AnalyticsPage() {
                 if (f) handleUpload(f);
                 e.currentTarget.value = '';
               }}
-              className="block w-full text-sm text-gray-700 file:mr-4 file:py-2 file:px-3 file:rounded-lg file:border-0 file:bg-blue-600 file:text-white hover:file:bg-blue-700 disabled:opacity-50"
+              className="block w-full text-sm text-slate-600 file:mr-3 file:py-2 file:px-3 file:rounded-xl file:border-0 file:bg-slate-900 file:text-white file:text-xs file:font-semibold hover:file:bg-slate-800 disabled:opacity-50"
             />
-            {uploading && <p className="text-xs text-gray-500 mt-2">Uploading…</p>}
-            <div className="mt-4 pt-4 border-t">
-              <p className="text-sm text-gray-700 mb-2">No file handy?</p>
-              <button
-                onClick={handleCreateDemo}
-                disabled={seeding}
-                className="w-full px-3 py-2 rounded-lg text-sm bg-gray-900 text-white disabled:opacity-50"
-              >
-                {seeding ? 'Creating demo…' : 'Create demo dataset'}
-              </button>
-              <p className="text-xs text-gray-500 mt-2">Creates 2 projects and multiple trades to test filters.</p>
-            </div>
-          </div>
-
-          <AiTableDesigner onCreated={loadDatasets} />
-
-          <div className="bg-white border rounded-xl p-4">
-            <h2 className="font-medium text-gray-800 mb-2">Select Table</h2>
-            {isLoading ? (
-              <p className="text-sm text-gray-500">Loading…</p>
-            ) : tableOptions.length === 0 ? (
-                <p className="text-sm text-gray-500">No datasets yet. Upload an Excel/CSV file.</p>
-            ) : (
-              <>
-                <select
-                  value={selectedTableId}
-                  onChange={(e) => setSelectedTableId(e.target.value)}
-                  className="w-full border rounded-lg px-3 py-2 text-sm"
-                >
-                  {tableOptions.map((opt) => (
-                    <option key={opt.table.id} value={opt.table.id}>
-                      {opt.dataset.title} — {opt.table.name}
-                    </option>
-                  ))}
-                </select>
-                {selected && (
-                  <div className="mt-3">
-                    <p className="text-xs text-gray-500">
-                      Rows: {selected.table.row_count} • Columns: {selected.table.column_count}
-                    </p>
-                    <div className="mt-2 max-h-48 overflow-auto border rounded-lg p-2">
-                      {(selected.table.columns ?? []).map((c) => (
-                        <div key={c.id} className="text-xs text-gray-700">
-                          <span className="font-mono">{c.normalized_name}</span>{' '}
-                          <span className="text-gray-400">({c.data_type})</span>
-                          {(c as any).semantic_name && (
-                            <span className="ml-1.5 px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 text-[10px] font-medium">
-                              {(c as any).semantic_name}
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </>
+            {uploading && (
+              <p className="text-xs text-slate-400 mt-2 flex items-center gap-1.5">
+                <Loader2 className="w-3 h-3 animate-spin" /> Wird hochgeladen…
+              </p>
             )}
+            <button
+              onClick={handleCreateDemo}
+              disabled={seeding}
+              className="mt-3 w-full px-3 py-2 rounded-xl text-xs font-medium text-slate-500 border border-slate-200 hover:bg-slate-50 disabled:opacity-50 transition-colors"
+            >
+              {seeding ? 'Wird erstellt…' : 'Demo-Daten erstellen · Create demo'}
+            </button>
           </div>
 
-          {selected && <DatasetQualityPanel tableId={selected.table.id} />}
-
-          <div className="bg-white border rounded-xl p-4">
-            <h2 className="font-medium text-gray-800 mb-2">Dependency Scope</h2>
-            <p className="text-sm text-gray-500 mb-3">Select business keywords to focus recommendations. Leave empty to analyze all.</p>
-            <div className="max-h-56 overflow-auto border rounded-lg p-2 space-y-1">
-              {keywords.length === 0 ? (
-                <p className="text-xs text-gray-500">No keywords available.</p>
-              ) : (
-                keywords.map((k) => {
-                  const checked = selectedKeywordIds.includes(k.id);
-                  return (
-                    <label key={k.id} className="flex items-start gap-2 text-xs text-gray-700">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={() => {
-                          setSelectedKeywordIds((prev) =>
-                            prev.includes(k.id) ? prev.filter((id) => id !== k.id) : [...prev, k.id]
-                          );
-                        }}
-                        className="mt-0.5"
-                      />
-                      <span>{k.title}</span>
-                    </label>
-                  );
-                })
-              )}
-            </div>
-            {selectedKeywordIds.length > 0 && (
-              <button
-                onClick={() => setSelectedKeywordIds([])}
-                className="mt-2 text-xs text-gray-600 hover:text-gray-800"
-              >
-                Clear selection ({selectedKeywordIds.length})
-              </button>
-            )}
-          </div>
+          <AiTableDesigner onCreated={(created) => loadDatasets(created?.table_id)} />
         </section>
 
-        <section className="lg:col-span-2 space-y-4">
-          <div className="bg-white border rounded-xl p-4">
-            <h2 className="font-medium text-gray-800 mb-2">Ask (Computed)</h2>
+        {/* ——— Main: selected table with tabs ——— */}
+        <section className="min-w-0 space-y-4">
+          {!selected ? (
+            <div className="bg-white rounded-2xl border border-slate-200 border-dashed p-16 text-center">
+              <Table2 className="w-8 h-8 text-slate-300 mx-auto mb-3" />
+              <p className="text-slate-500 font-medium">Wähle links eine Tabelle · Select a table</p>
+            </div>
+          ) : (
+            <>
+              {/* Table header */}
+              <div className="bg-white rounded-2xl border border-slate-200 p-5">
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div className="min-w-0">
+                    <h2 className="text-lg font-bold text-slate-900">{selected.table.name}</h2>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {selected.dataset.title} · {selected.table.row_count} Zeilen · {selected.table.column_count} Spalten
+                    </p>
+                  </div>
+                  {selectedDatasetKeyword && (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-blue-50 text-blue-700 text-xs font-semibold">
+                      <FolderTree className="w-3.5 h-3.5" /> {selectedDatasetKeyword.title}
+                    </span>
+                  )}
+                </div>
+                <div className="flex gap-1.5 flex-wrap mt-3">
+                  {(selected.table.columns ?? []).slice(0, 14).map((c) => (
+                    <span
+                      key={c.id}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-slate-50 border border-slate-100 text-[11px] text-slate-600"
+                    >
+                      {c.name}
+                      {(c as any).semantic_name && (
+                        <span className="text-blue-500 font-medium">· {(c as any).semantic_name}</span>
+                      )}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Tabs */}
+              <div className="flex gap-2">
+                {tabs.map((t) => (
+                  <button
+                    key={t.id}
+                    onClick={() => setTab(t.id)}
+                    className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                      tab === t.id
+                        ? 'bg-blue-50 text-blue-700 ring-1 ring-blue-200'
+                        : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-50'
+                    }`}
+                  >
+                    <t.icon className="w-4 h-4" />
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Tab: Daten */}
+              {tab === 'data' &&
+                (selectedDatasetKeyword ? (
+                  <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+                    <KeywordDataWorkspace
+                      keywordId={selectedDatasetKeyword.id}
+                      keywordTitle={selectedDatasetKeyword.title}
+                    />
+                  </div>
+                ) : (
+                  <div className="bg-white rounded-2xl border border-slate-200 p-4">
+                    <DataGrid tableId={selected.table.id} columns={selected.table.columns ?? []} />
+                  </div>
+                ))}
+
+              {/* Tab: Qualität */}
+              {tab === 'quality' && <DatasetQualityPanel tableId={selected.table.id} />}
+
+              {/* Tab: KI-Analyse */}
+              {tab === 'ai' && (
+                <div className="space-y-4">
+          <div className="bg-white rounded-2xl border border-slate-200 p-4">
+            <h2 className="font-medium text-slate-800 mb-2">Frage stellen · Ask (computed)</h2>
             <p className="text-sm text-gray-500 mb-3">
               Examples: “Total amount by trade for project Riverside Tower in 2025-11”, “Avg approval_time_hours by supplier”, “Unpaid total by project”.
             </p>
@@ -502,6 +574,41 @@ export default function AnalyticsPage() {
               )}
             </div>
           )}
+
+          {/* Recommendation scope: pick keywords to focus the dependency analysis */}
+          <details className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+            <summary className="flex items-center justify-between px-4 py-3 cursor-pointer text-sm font-medium text-slate-700 hover:bg-slate-50 list-none">
+              <span className="flex items-center gap-2">
+                <FolderTree className="w-4 h-4 text-slate-400" />
+                Analyse-Fokus · Scope
+                {selectedKeywordIds.length > 0 && (
+                  <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 text-[10px] font-bold">
+                    {selectedKeywordIds.length}
+                  </span>
+                )}
+              </span>
+              <ChevronDown className="w-4 h-4 text-slate-300" />
+            </summary>
+            <div className="px-4 pb-3 max-h-52 overflow-auto grid grid-cols-2 sm:grid-cols-3 gap-1">
+              {keywords.map((k) => {
+                const checked = selectedKeywordIds.includes(k.id);
+                return (
+                  <label key={k.id} className="flex items-center gap-2 text-xs text-slate-600 px-1.5 py-1 rounded hover:bg-slate-50 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() =>
+                        setSelectedKeywordIds((prev) =>
+                          prev.includes(k.id) ? prev.filter((id) => id !== k.id) : [...prev, k.id]
+                        )
+                      }
+                    />
+                    <span className="truncate">{k.title}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </details>
 
           {recommendationResult && (
             <div className="bg-white border rounded-xl p-4">
@@ -582,6 +689,10 @@ export default function AnalyticsPage() {
                 </div>
               )}
             </div>
+          )}
+                </div>
+              )}
+            </>
           )}
         </section>
       </main>
