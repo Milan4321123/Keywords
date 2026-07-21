@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { Users, Mail, Loader2, Trash2, ShieldCheck } from 'lucide-react';
+import { Users, Mail, Loader2, Trash2, ShieldCheck, FolderTree } from 'lucide-react';
+import { Keyword } from '@/types';
+import MemberKeywordAssignments from '@/components/MemberKeywordAssignments';
 
 interface MemberRow {
   id: string;
@@ -28,6 +30,8 @@ export default function AdminPage() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('editor');
   const [inviting, setInviting] = useState(false);
+  const [keywords, setKeywords] = useState<Keyword[]>([]);
+  const [assignOpenFor, setAssignOpenFor] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -46,6 +50,10 @@ export default function AdminPage() {
 
   useEffect(() => {
     load();
+    fetch('/api/keywords')
+      .then((r) => r.json())
+      .then(({ data }) => setKeywords(data ?? []))
+      .catch(() => setKeywords([]));
   }, [load]);
 
   const invite = async (e: React.FormEvent) => {
@@ -160,45 +168,71 @@ export default function AdminPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {members.map((member) => (
-                <tr key={member.id}>
-                  <td className="px-5 py-3">
-                    <div className="font-medium text-slate-800">
-                      {member.profiles?.full_name || member.profiles?.email}
-                    </div>
-                    {member.profiles?.full_name && (
-                      <div className="text-xs text-slate-400">{member.profiles.email}</div>
-                    )}
-                  </td>
-                  <td className="px-5 py-3">
-                    {member.role === 'owner' ? (
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 text-xs font-semibold">
-                        <ShieldCheck className="w-3.5 h-3.5" /> owner
-                      </span>
-                    ) : (
-                      <select
-                        value={member.role}
-                        onChange={(e) => changeRole(member.id, e.target.value)}
-                        className="px-2 py-1.5 text-xs rounded-lg border border-slate-200 bg-slate-50"
-                      >
-                        {ROLES.map((r) => (
-                          <option key={r} value={r}>
-                            {r}
-                          </option>
-                        ))}
-                      </select>
-                    )}
-                  </td>
-                  <td className="px-5 py-3 text-right">
-                    {member.role !== 'owner' && (
-                      <button
-                        onClick={() => remove(`member_id=${member.id}`)}
-                        className="p-2 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    )}
-                  </td>
-                </tr>
+                <React.Fragment key={member.id}>
+                  <tr>
+                    <td className="px-5 py-3">
+                      <div className="font-medium text-slate-800">
+                        {member.profiles?.full_name || member.profiles?.email}
+                      </div>
+                      {member.profiles?.full_name && (
+                        <div className="text-xs text-slate-400">{member.profiles.email}</div>
+                      )}
+                    </td>
+                    <td className="px-5 py-3">
+                      {member.role === 'owner' ? (
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 text-xs font-semibold">
+                          <ShieldCheck className="w-3.5 h-3.5" /> owner
+                        </span>
+                      ) : (
+                        <select
+                          value={member.role}
+                          onChange={(e) => changeRole(member.id, e.target.value)}
+                          className="px-2 py-1.5 text-xs rounded-lg border border-slate-200 bg-slate-50"
+                        >
+                          {ROLES.map((r) => (
+                            <option key={r} value={r}>
+                              {r}
+                            </option>
+                          ))}
+                        </select>
+                      )}
+                    </td>
+                    <td className="px-5 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        {member.role !== 'owner' && (
+                          <button
+                            onClick={() =>
+                              setAssignOpenFor(assignOpenFor === member.id ? null : member.id)
+                            }
+                            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold transition-colors ${
+                              assignOpenFor === member.id
+                                ? 'bg-blue-50 text-blue-700'
+                                : 'text-slate-500 hover:bg-slate-100'
+                            }`}
+                            title="Begriffe zuweisen · Assign keywords"
+                          >
+                            <FolderTree className="w-3.5 h-3.5" /> Begriffe
+                          </button>
+                        )}
+                        {member.role !== 'owner' && (
+                          <button
+                            onClick={() => remove(`member_id=${member.id}`)}
+                            className="p-2 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                  {assignOpenFor === member.id && (
+                    <tr>
+                      <td colSpan={3} className="px-5 pb-4">
+                        <MemberKeywordAssignments memberId={member.id} keywords={keywords} />
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
               ))}
               {invites.map((invite) => (
                 <tr key={invite.id} className="bg-slate-50/50">

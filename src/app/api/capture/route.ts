@@ -3,6 +3,7 @@ import { requireOrgContext, audit, accessibleLevels } from '@/lib/auth';
 import { apiError } from '@/lib/api';
 import { getCaptureFormsForKeyword, validateAndCoerce } from '@/lib/capture';
 import { CaptureField } from '@/lib/capture-types';
+import { keywordInPersonalScope } from '@/lib/ontology/assignments';
 
 // GET /api/capture?keyword_id= — capture forms derived from the keyword's datasets
 export async function GET(req: NextRequest) {
@@ -21,11 +22,24 @@ export async function GET(req: NextRequest) {
       .eq('organization_id', ctx.org.id)
       .in('access_level', accessibleLevels(ctx.role))
       .maybeSingle();
-    if (!keyword) {
+    if (!keyword || !(await keywordInPersonalScope(ctx, keywordId))) {
       return NextResponse.json({ data: { forms: [] }, error: null });
     }
 
     const forms = await getCaptureFormsForKeyword(ctx.supabase, ctx.org.id, keywordId);
+
+    // "Meine Einträge": each member sees their own recent records per table
+    for (const form of forms) {
+      const { data: own } = await ctx.supabase
+        .from('dataset_rows')
+        .select('id, row_index, data, created_at')
+        .eq('dataset_table_id', form.dataset_table_id)
+        .eq('source_json->>captured_by', ctx.user.email)
+        .order('row_index', { ascending: false })
+        .limit(5);
+      (form as any).recent_own = own ?? [];
+    }
+
     return NextResponse.json({ data: { forms }, error: null });
   } catch (error) {
     return apiError(error, 'Failed to load capture forms');
@@ -64,7 +78,7 @@ export async function POST(req: NextRequest) {
         .eq('id', dataset.keyword_id)
         .in('access_level', accessibleLevels(ctx.role))
         .maybeSingle();
-      if (!kw) {
+      if (!kw || !(await keywordInPersonalScope(ctx, dataset.keyword_id))) {
         return NextResponse.json({ data: null, error: 'Table not found' }, { status: 404 });
       }
     }

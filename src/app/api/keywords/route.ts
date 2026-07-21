@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireOrgContext, audit, accessibleLevels, canUseAccessLevel, KeywordAccessLevel } from '@/lib/auth';
 import { apiError } from '@/lib/api';
 import { computeCompleteness } from '@/lib/ontology/completeness';
+import { personalKeywordScope } from '@/lib/ontology/assignments';
 import { keywordPayloadError } from '@/lib/validation';
 
 const KEYWORD_TYPES = [
@@ -27,7 +28,11 @@ export async function GET(req: NextRequest) {
 
     if (error) throw error;
 
-    return NextResponse.json({ data: keywords, error: null });
+    // Personal scope: workers with assignments see only their branches
+    const scope = await personalKeywordScope(ctx);
+    const visible = scope ? (keywords ?? []).filter((k) => scope.has(k.id)) : keywords;
+
+    return NextResponse.json({ data: visible, error: null });
   } catch (error) {
     return apiError(error, 'Failed to fetch keywords');
   }

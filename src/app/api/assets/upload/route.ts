@@ -4,6 +4,7 @@ import { enforceRateLimit } from '@/lib/rate-limit';
 import { apiError } from '@/lib/api';
 import { processAsset } from '@/lib/ingestion/process';
 import { recomputeKeywordCompleteness } from '@/lib/ontology/completeness';
+import { keywordInPersonalScope } from '@/lib/ontology/assignments';
 import { fileSizeError } from '@/lib/validation';
 
 // POST /api/assets/upload - Upload files and link to keyword
@@ -29,7 +30,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ data: null, error: sizeError }, { status: 413 });
     }
 
-    // Keyword link must belong to the active organization
+    // Keyword link must belong to the active organization and the member's scope
     if (keywordId) {
       const { data: keyword } = await ctx.supabase
         .from('keywords')
@@ -37,7 +38,7 @@ export async function POST(req: NextRequest) {
         .eq('id', keywordId)
         .eq('organization_id', ctx.org.id)
         .maybeSingle();
-      if (!keyword) {
+      if (!keyword || !(await keywordInPersonalScope(ctx, keywordId))) {
         return NextResponse.json({ data: null, error: 'Keyword not found' }, { status: 400 });
       }
     }
