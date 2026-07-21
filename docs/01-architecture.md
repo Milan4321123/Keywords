@@ -23,7 +23,7 @@ Next.js API routes ("/api/*")
   │   1. requireOrgContext(): user → org membership → role → permission check
   │   2. all queries scoped by organization_id (service client) + RLS backstop
   │   3. audit log write on every mutation
-  ├──► Postgres (keywords, relations, assets, chunks, datasets, metrics, …)
+  ├──► Postgres (business objects/facts/events, keywords, datasets, metrics, tasks, evidence, …)
   ├──► Supabase Storage (files, signed URLs)
   ├──► AI provider (chat, embeddings, transcription)
   └──► Structured Data Engine (src/lib/analytics.ts — filter/group/aggregate over dataset_rows)
@@ -69,6 +69,33 @@ Upload → store file (private bucket)
       → if tabular: dataset import → tables/columns/rows + type inference (exists, harden M5)
       → mark processed, write provenance to meta_json, audit log
 ```
+
+## Grounded business data layer
+
+The ontology explains what a business term means; it is not the identity of a
+real customer, project, invoice, or employee. Migration 0008 adds the missing
+operational layer:
+
+```
+keyword meaning ──► business object identity ──► current sourced facts
+                              │                  └── fact history (valid time)
+                              ├──► immutable events
+                              └──► keywords, tasks, datasets, assets, metrics
+```
+
+- `business_objects` holds stable identities and external keys.
+- `business_facts` is append-only state with validity windows, truth status,
+  source type, and source record IDs. `current_business_facts` provides the
+  deterministic current read model.
+- `business_events` records what happened and when without rewriting history.
+- `business_object_links` gives one object multiple semantic and operational
+  contexts instead of duplicating it.
+- `business_object_relations` connects real objects to one another with their
+  own provenance and validity.
+
+The AI context builder loads these facts before ontology and document context,
+preserves the fact's truth category, and still computes numbers only through
+registered metric definitions.
 
 ## AI request lifecycle (M6 target)
 

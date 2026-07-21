@@ -125,12 +125,12 @@ export function extractPotentialKeywords(question: string, keywords: Keyword[]):
     if (questionLower.includes(kw.title.toLowerCase())) return true;
     
     // Check synonyms
-    if (kw.synonyms?.some(syn => questionLower.includes(syn.toLowerCase()))) return true;
+    if (kw.synonyms?.some((syn) => typeof syn === 'string' && questionLower.includes(syn.toLowerCase()))) return true;
     
     // Check multilingual labels
     if (kw.labels_json) {
       for (const label of Object.values(kw.labels_json)) {
-        if (questionLower.includes(label.toLowerCase())) return true;
+        if (typeof label === 'string' && questionLower.includes(label.toLowerCase())) return true;
       }
     }
     

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { requireOrgContext, audit, authErrorResponse } from '@/lib/auth';
 import { enforceRateLimit } from '@/lib/rate-limit';
-import { openai } from '@/lib/openai';
+import { getToolRuntime } from '@/lib/ai/provider';
 import { runTableQuery, comparePeriods, TableQuerySpec, ComparePeriodsSpec } from '@/lib/analytics';
 import { AnalyticsAskRequest } from '@/types';
 
@@ -219,6 +219,7 @@ export async function POST(req: NextRequest) {
       { role: 'system', content: system },
       { role: 'user', content: body.question },
     ];
+    const toolRuntime = getToolRuntime('fast');
 
     const executeTableQuery = (args: any) => {
       const spec: TableQuerySpec = {
@@ -242,8 +243,8 @@ export async function POST(req: NextRequest) {
     };
 
     for (let round = 0; round < 4; round++) {
-      const resp = await openai.chat.completions.create({
-        model: 'gpt-4-turbo-preview',
+      const resp = await toolRuntime.client.chat.completions.create({
+        model: toolRuntime.model,
         messages,
         tools,
         tool_choice: 'auto',

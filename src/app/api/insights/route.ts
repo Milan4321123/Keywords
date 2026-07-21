@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireOrgContext, audit } from '@/lib/auth';
 import { apiError } from '@/lib/api';
 import { enforceRateLimit } from '@/lib/rate-limit';
-import { openai, AI_MODELS } from '@/lib/openai';
+import { getProvider } from '@/lib/ai/provider';
 import {
   loadOntology,
   getWorldModel,
@@ -194,20 +194,18 @@ Respond with ONLY valid JSON: {"insights":[{"severity":"high|medium|low","catego
       undefined_keywords: undefinedList,
     });
 
-    const response = await openai.chat.completions.create({
-      model: AI_MODELS.chat,
-      messages: [
+    const provider = getProvider();
+    const responseText = await provider.chat(
+      [
         { role: 'system', content: system },
         { role: 'user', content: user },
       ],
-      temperature: 0.4,
-      max_tokens: 3000,
-      response_format: { type: 'json_object' },
-    });
+      { tier: 'strong', temperature: 0.4, maxTokens: 3000, json: true }
+    );
 
     let raw: any = {};
     try {
-      raw = JSON.parse(response.choices[0].message.content || '{}');
+      raw = JSON.parse(responseText || '{}');
     } catch {
       return NextResponse.json({ data: null, error: 'AI returned invalid JSON' }, { status: 502 });
     }

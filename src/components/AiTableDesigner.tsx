@@ -36,7 +36,13 @@ const TYPE_ICONS: Record<string, React.ComponentType<{ className?: string }>> = 
 
 const AUTO_SEMANTICS = new Set(['business_date', 'event_timestamp', 'weekday', 'employee_id', 'evidence_reference']);
 
-export default function AiTableDesigner({ onCreated }: { onCreated: () => void }) {
+export default function AiTableDesigner({
+  onCreated,
+  defaultKeywordId = '',
+}: {
+  onCreated: (created?: { dataset_id: string; table_id: string; keyword_id: string | null }) => void;
+  defaultKeywordId?: string;
+}) {
   const [open, setOpen] = useState(false);
   const [description, setDescription] = useState('');
   const [busy, setBusy] = useState<'design' | 'create' | null>(null);
@@ -54,12 +60,12 @@ export default function AiTableDesigner({ onCreated }: { onCreated: () => void }
       const response = await fetch('/api/ai/design-table', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ description }),
+        body: JSON.stringify({ description, keyword_id: defaultKeywordId || null }),
       });
       const { data, error } = await response.json();
       if (error) throw new Error(error);
       setResult(data);
-      setKeywordId(data.spec.keyword_id ?? '');
+      setKeywordId(defaultKeywordId || data.spec.keyword_id || '');
     } catch (err: any) {
       setError(err.message || 'Fehlgeschlagen · Failed');
     } finally {
@@ -77,10 +83,10 @@ export default function AiTableDesigner({ onCreated }: { onCreated: () => void }
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ confirm: true, spec: result.spec, keyword_id: keywordId || null }),
       });
-      const { error } = await response.json();
+      const { data, error } = await response.json();
       if (error) throw new Error(error);
       setCreated(true);
-      onCreated();
+      onCreated(data);
     } catch (err: any) {
       setError(err.message || 'Anlegen fehlgeschlagen · Create failed');
     } finally {

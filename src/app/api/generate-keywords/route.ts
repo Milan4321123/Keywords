@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { mapSupabaseApiError } from '@/lib/supabase-errors';
 import { requireOrgContext, audit, authErrorResponse } from '@/lib/auth';
-import { chatCompletion } from '@/lib/openai';
+import { getProvider } from '@/lib/ai/provider';
 import { KeywordSuggestion, GenerateKeywordsResponse, Keyword } from '@/types';
 
 const GENERATE_KEYWORDS_PROMPT = `You are an expert knowledge architect. Your task is to generate a structured keyword/concept hierarchy for a company knowledge base.
@@ -81,9 +81,11 @@ Requirements:
       { role: 'user' as const, content: userPrompt },
     ];
 
-    const response = await chatCompletion(messages, {
+    const response = await getProvider().chat(messages, {
+      tier: 'strong',
+      json: true,
       temperature: 0.7,
-      max_tokens: 2000,
+      maxTokens: 2000,
     });
 
     // Parse the JSON response

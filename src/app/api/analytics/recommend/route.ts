@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { requireOrgContext, authErrorResponse } from '@/lib/auth';
-import { chatCompletion } from '@/lib/openai';
+import { getProvider } from '@/lib/ai/provider';
 import { AnalyticsRecommendation, AnalyticsRecommendationRequest, RelationType } from '@/types';
 
 export const runtime = 'nodejs';
@@ -277,7 +277,7 @@ export async function POST(req: NextRequest) {
           recommendation: r.recommendation,
         }));
 
-        executiveSummary = await chatCompletion(
+        executiveSummary = await getProvider().chat(
           [
             {
               role: 'system',
@@ -294,7 +294,7 @@ export async function POST(req: NextRequest) {
               }),
             },
           ],
-          { temperature: 0.2, max_tokens: 450, model: 'gpt-4o-mini' }
+          { tier: 'fast', temperature: 0.2, maxTokens: 450 }
         );
       } catch {
         executiveSummary = null;

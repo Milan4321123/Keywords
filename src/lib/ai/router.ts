@@ -4,8 +4,8 @@ export type Intent = 'definition' | 'analysis' | 'report' | 'forecast' | 'workfl
 
 const HEURISTICS: Array<{ intent: Intent; pattern: RegExp }> = [
   { intent: 'forecast', pattern: /\b(forecast|predict|projection|next (month|quarter|year)|expect(ed)? (revenue|income|sales)|prognose)\b/i },
-  { intent: 'report', pattern: /\b(report|zusammenfassung|monthly summary|weekly summary|executive summary|generate .{0,20}(report|overview))\b/i },
-  { intent: 'workflow', pattern: /\b(task|todo|blocked|next step|checklist|workflow|who (should|needs to)|what (should|do) (i|we) do)\b/i },
+  { intent: 'report', pattern: /\b(report|zusammenfassung|monthly summary|weekly summary|executive summary|project status|status report|projektstatus|management update|generate .{0,20}(report|overview))\b/i },
+  { intent: 'workflow', pattern: /\b(task|todo|blocked|blocker|milestone|deadline|overdue|risk|next step|checklist|workflow|responsible|responsibility|owner|who (should|needs to)|what (should|do) (i|we) do)\b/i },
   { intent: 'analysis', pattern: /\b(how (much|many)|total|sum|average|avg|count|compare|trend|top \d+|highest|lowest|revenue|income|expense|umsatz|cost|per (month|project|customer)|percentage|%)\b/i },
   { intent: 'definition', pattern: /\b(what is|what does .{0,30} mean|define|definition of|meaning of|explain (the )?(term|concept)|was ist|was bedeutet)\b/i },
 ];

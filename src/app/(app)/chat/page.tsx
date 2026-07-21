@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import {
   MessageSquare,
   Send,
@@ -13,6 +14,7 @@ import {
   AlertTriangle,
   RotateCcw,
   ChevronDown,
+  Gauge,
 } from 'lucide-react';
 import { Keyword } from '@/types';
 
@@ -35,8 +37,18 @@ interface TableOption {
 
 interface AiSources {
   keywords: Array<{ id: string; title: string; relevance: number; via: string }>;
+  business_objects: Array<{ id: string; type: string; name: string; fact_count: number }>;
   documents: Array<{ chunk_id: string; file_name: string | null; similarity: number }>;
   tables: Array<{ table_id: string; name: string; dataset: string }>;
+}
+
+interface ContextQuality {
+  score: number;
+  grade: 'high' | 'medium' | 'low';
+  strengths: string[];
+  warnings: string[];
+  latest_recorded_at: string | null;
+  coverage: Record<string, number>;
 }
 
 interface AiMessage {
@@ -46,9 +58,11 @@ interface AiMessage {
   sources?: AiSources;
   calculations?: Array<{ tool: string; input: Record<string, any>; output: Record<string, any> }>;
   missing_data?: string[];
+  context_quality?: ContextQuality;
 }
 
 export default function ChatPage() {
+  const searchParams = useSearchParams();
   const [keywords, setKeywords] = useState<Keyword[]>([]);
   const [tables, setTables] = useState<TableOption[]>([]);
   const [mode, setMode] = useState<Mode>('auto');
@@ -61,6 +75,19 @@ export default function ChatPage() {
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+  const initialContextApplied = useRef(false);
+
+  useEffect(() => {
+    if (initialContextApplied.current) return;
+    const keywordId = searchParams.get('keyword_id');
+    const prompt = searchParams.get('prompt');
+    const requestedMode = searchParams.get('mode') as Mode | null;
+    if (keywordId) setScopeKeywordIds([keywordId]);
+    if (prompt) setInput(prompt);
+    if (requestedMode && MODES.some((item) => item.id === requestedMode)) setMode(requestedMode);
+    if (keywordId || prompt || requestedMode) setScopeOpen(Boolean(keywordId));
+    initialContextApplied.current = true;
+  }, [searchParams]);
 
   useEffect(() => {
     fetch('/api/keywords')
@@ -129,6 +156,7 @@ export default function ChatPage() {
           sources: data.sources,
           calculations: data.calculations,
           missing_data: data.missing_data,
+          context_quality: data.context_quality,
         },
       ]);
     } catch (err: any) {
@@ -272,6 +300,24 @@ export default function ChatPage() {
                     {message.intent}
                   </span>
                 )}
+                {message.context_quality && (
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className={`inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-[10px] font-bold uppercase tracking-wide ${
+                      message.context_quality.grade === 'high'
+                        ? 'bg-emerald-50 text-emerald-700'
+                        : message.context_quality.grade === 'medium'
+                          ? 'bg-amber-50 text-amber-700'
+                          : 'bg-red-50 text-red-700'
+                    }`}>
+                      <Gauge className="w-3 h-3" /> Grounding {message.context_quality.score}%
+                    </span>
+                    <span className="text-[10px] text-slate-400">
+                      {message.context_quality.latest_recorded_at
+                        ? `latest record ${new Date(message.context_quality.latest_recorded_at).toLocaleDateString()}`
+                        : 'no source date available'}
+                    </span>
+                  </div>
+                )}
                 <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
                   {message.content}
                 </div>
@@ -310,6 +356,7 @@ export default function ChatPage() {
 
               {message.sources &&
                 (message.sources.keywords.length > 0 ||
+                  message.sources.business_objects.length > 0 ||
                   message.sources.documents.length > 0 ||
                   message.sources.tables.length > 0) && (
                   <div className="px-5 py-3 bg-slate-50/60 border-t border-slate-100 flex items-center gap-2 flex-wrap">
@@ -317,6 +364,11 @@ export default function ChatPage() {
                       <span key={k.id} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-blue-50 text-blue-700 text-[11px] font-medium">
                         <FolderTree className="w-3 h-3" /> {k.title}
                         {k.via !== 'seed' && <span className="opacity-60">· {k.via}</span>}
+                      </span>
+                    ))}
+                    {message.sources.business_objects.slice(0, 4).map((object) => (
+                      <span key={object.id} className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-indigo-50 text-indigo-700 text-[11px] font-medium">
+                        <Gauge className="w-3 h-3" /> {object.name} · {object.fact_count} facts
                       </span>
                     ))}
                     {message.sources.tables.map((t) => (

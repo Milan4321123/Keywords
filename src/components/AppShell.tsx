@@ -22,6 +22,8 @@ import {
   Menu,
   X,
   HardHat,
+  FolderOpen,
+  Briefcase,
 } from 'lucide-react';
 import { createBrowserSupabase } from '@/lib/supabase/client';
 
@@ -43,15 +45,18 @@ interface AppShellProps {
 }
 
 const WORK_ITEM = { href: '/work', label: 'Arbeitsansicht · Work', icon: HardHat };
+const FILES_ITEM = { href: '/files', label: 'Dateien · Files', icon: FolderOpen };
 
 // Full navigation for editors, managers, and admins
 const NAV_ITEMS = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/projects', label: 'Projects', icon: Briefcase },
   WORK_ITEM,
   { href: '/keywords', label: 'Keyword Map', icon: FolderTree },
   { href: '/insights', label: 'Einblicke · Insights', icon: Lightbulb },
   { href: '/graph', label: 'Graph View', icon: Waypoints },
   { href: '/data', label: 'Data Hub', icon: Database },
+  FILES_ITEM,
   { href: '/chat', label: 'AI Chat', icon: MessageSquare },
   { href: '/reports', label: 'Reports', icon: FileText },
   { href: '/metrics', label: 'Metrics', icon: Gauge },
@@ -61,6 +66,7 @@ const NAV_ITEMS = [
 // Stripped-down navigation for on-site workers
 const WORKER_NAV_ITEMS = [
   WORK_ITEM,
+  FILES_ITEM,
   { href: '/chat', label: 'AI Chat', icon: MessageSquare },
 ];
 

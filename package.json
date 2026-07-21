@@ -11,6 +11,8 @@
     "test": "tsx --test tests/*.test.ts",
     "vault": "tsx scripts/vault-sync.ts",
     "seed:demo": "tsx scripts/seed-demo.ts",
+    "seed:operations": "tsx scripts/seed-real-operations.ts",
+    "seed:project": "tsx scripts/seed-project-management.ts",
     "export:finetune": "tsx scripts/export-finetune.ts",
     "mcp": "tsx scripts/mcp-server.ts"
   },

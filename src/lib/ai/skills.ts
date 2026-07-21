@@ -1,6 +1,6 @@
 import { createHash } from 'crypto';
 import { OrgContext, accessibleLevels, roleHasPermission } from '@/lib/auth';
-import { chatCompletion } from '@/lib/openai';
+import { getProvider } from '@/lib/ai/provider';
 import { Keyword, KeywordRelation } from '@/types';
 
 /**
@@ -181,7 +181,7 @@ export async function getWorldModel(
   if (!canWrite) return cached; // stale is better than nothing for read-only roles
 
   const skeleton = buildOntologySkeleton(ctx, ontology);
-  const markdown = await chatCompletion(
+  const markdown = await getProvider().chat(
     [
       {
         role: 'system',
@@ -192,7 +192,7 @@ export async function getWorldModel(
       },
       { role: 'user', content: skeleton },
     ],
-    { temperature: 0.3, max_tokens: 1400 }
+    { tier: 'strong', temperature: 0.3, maxTokens: 1400 }
   );
 
   const model: WorldModel = {

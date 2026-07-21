@@ -7,6 +7,7 @@ import {
   BookOpen,
   ChevronRight,
   Clock,
+  Database,
   FileUp,
   Link2,
   Loader2,
@@ -17,9 +18,11 @@ import { computeCompleteness } from '@/lib/ontology/completeness';
 import KeywordDetail from '@/components/KeywordDetail';
 import RelationEditor from '@/components/RelationEditor';
 import FileUpload from '@/components/FileUpload';
+import KeywordDataWorkspace from '@/components/KeywordDataWorkspace';
+import KeywordContextOverview from '@/components/KeywordContextOverview';
 import { openAsset } from '@/lib/asset-view';
 
-type Tab = 'overview' | 'relations' | 'files' | 'history';
+type Tab = 'overview' | 'data' | 'relations' | 'files' | 'history';
 
 const STATUS_STYLES: Record<string, string> = {
   draft: 'bg-amber-50 text-amber-700 border-amber-200',
@@ -288,6 +291,7 @@ export default function KeywordDetailPage() {
       <div className="flex gap-2 overflow-x-auto">
         {[
           { id: 'overview' as Tab, label: 'Overview', icon: BookOpen },
+          { id: 'data' as Tab, label: 'Daten · Data', icon: Database },
           { id: 'relations' as Tab, label: `Relations (${relations.length})`, icon: Link2 },
           { id: 'files' as Tab, label: `Files (${assets.length})`, icon: FileUp },
           { id: 'history' as Tab, label: 'History', icon: Clock },
@@ -310,13 +314,16 @@ export default function KeywordDetailPage() {
       {/* Tab content */}
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
         {tab === 'overview' && (
-          <KeywordDetail
-            keyword={keyword}
-            allKeywords={allKeywords}
-            onSave={handleSave}
-            onDelete={handleDelete}
-            onClose={() => router.push('/keywords')}
-          />
+          <>
+            <KeywordContextOverview keyword={keyword} children={children} relations={relations} assets={assets} />
+            <KeywordDetail
+              keyword={keyword}
+              allKeywords={allKeywords}
+              onSave={handleSave}
+              onDelete={handleDelete}
+              onClose={() => router.push('/keywords')}
+            />
+          </>
         )}
 
         {tab === 'relations' && (
@@ -329,6 +336,10 @@ export default function KeywordDetailPage() {
               onRemoveRelation={handleRemoveRelation}
             />
           </div>
+        )}
+
+        {tab === 'data' && (
+          <KeywordDataWorkspace keywordId={keyword.id} keywordTitle={keyword.title} />
         )}
 
         {tab === 'files' && (

@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireOrgContext, audit } from '@/lib/auth';
 import { apiError } from '@/lib/api';
-import { openai } from '@/lib/openai';
-import { getProvider } from '@/lib/ai/provider';
+import { getProvider, getToolRuntime } from '@/lib/ai/provider';
 import { detectIntent, needsStructuredData, Intent } from '@/lib/ai/router';
 import { buildContext, SYSTEM_INSTRUCTIONS } from '@/lib/ai/context-builder';
 import { runTableQuery, comparePeriods, DatasetRow } from '@/lib/analytics';
 import { computeMetric, MetricDefinition } from '@/lib/metrics/compute';
+import { compareMetricValues, MetricComparisonOperation } from '@/lib/metrics/compare';
 import { forecastSeries } from '@/lib/forecasting/forecast';
 import { enforceRateLimit } from '@/lib/rate-limit';
 
@@ -152,6 +152,9 @@ export async function POST(req: NextRequest) {
 
     if (useDataTools) {
       // Tool loop: the LLM plans, our engine computes. Rows loaded per table on demand.
+      // The fast model plans and explains deterministic tool results. The
+      // expensive reasoning happens in our metric/query engine, not the LLM.
+      const toolRuntime = getToolRuntime('fast');
       const rowCache = new Map<string, DatasetRow[]>();
       const validTableIds = new Set(built.datasetSchemas.map((s) => s.table_id));
 
@@ -186,6 +189,28 @@ export async function POST(req: NextRequest) {
               additionalProperties: false,
               properties: { table_id: { type: 'string' }, ...QUERY_SPEC_PROPS },
               required: ['table_id', 'metrics'],
+            },
+          },
+        },
+        {
+          type: 'function' as const,
+          function: {
+            name: 'compare_metrics',
+            description:
+              'Perform arithmetic between two registered metrics after computing both from their source rows. REQUIRED for variance, difference, percentage difference, or ratio between metrics. Never calculate these in prose. metric_a minus metric_b; percent_difference uses metric_b as the baseline.',
+            parameters: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                metric_a_id: { type: 'string' },
+                metric_b_id: { type: 'string' },
+                operations: {
+                  type: 'array',
+                  minItems: 1,
+                  items: { type: 'string', enum: ['difference', 'percent_difference', 'ratio'] },
+                },
+              },
+              required: ['metric_a_id', 'metric_b_id', 'operations'],
             },
           },
         },
@@ -265,9 +290,9 @@ export async function POST(req: NextRequest) {
         { role: 'user', content: question },
       ];
 
-      for (let round = 0; round < 5; round++) {
-        const response = await openai.chat.completions.create({
-          model: 'gpt-4o',
+      for (let round = 0; round < 3; round++) {
+        const response = await toolRuntime.client.chat.completions.create({
+          model: toolRuntime.model,
           messages,
           tools,
           tool_choice: 'auto',
@@ -292,7 +317,34 @@ export async function POST(req: NextRequest) {
 
           let output: Record<string, any>;
           try {
-            if (call.function.name === 'compute_metric' || call.function.name === 'forecast_metric') {
+            if (call.function.name === 'compare_metrics') {
+              const ids = [args.metric_a_id, args.metric_b_id].filter((id) => typeof id === 'string');
+              const { data: metricRows } = await ctx.supabase
+                .from('metrics')
+                .select('*')
+                .eq('organization_id', ctx.org.id)
+                .in('id', ids);
+              const metricById = new Map((metricRows ?? []).map((metric: any) => [metric.id, metric]));
+              const metricA = metricById.get(args.metric_a_id) as MetricDefinition | undefined;
+              const metricB = metricById.get(args.metric_b_id) as MetricDefinition | undefined;
+              if (!metricA || !metricB) {
+                output = { error: 'Unknown metric id — use ids from the Metric Catalog in context.' };
+              } else {
+                const [computedA, computedB] = await Promise.all([
+                  computeMetric(ctx.supabase, ctx.org.id, metricA),
+                  computeMetric(ctx.supabase, ctx.org.id, metricB),
+                ]);
+                const allowed = new Set<MetricComparisonOperation>(['difference', 'percent_difference', 'ratio']);
+                const operations = (Array.isArray(args.operations) ? args.operations : [])
+                  .filter((operation: unknown): operation is MetricComparisonOperation => allowed.has(operation as MetricComparisonOperation));
+                output = {
+                  metric_a: { id: metricA.id, name: metricA.name, value: computedA.value, evidence_row_ids: computedA.evidence_row_ids },
+                  metric_b: { id: metricB.id, name: metricB.name, value: computedB.value, evidence_row_ids: computedB.evidence_row_ids },
+                  formula: 'difference = metric_a - metric_b; percent_difference = (metric_a - metric_b) / abs(metric_b) * 100; ratio = metric_a / metric_b',
+                  ...compareMetricValues(computedA.value, computedB.value, operations.length ? operations : ['difference']),
+                };
+              }
+            } else if (call.function.name === 'compute_metric' || call.function.name === 'forecast_metric') {
               const { data: metricRow } = await ctx.supabase
                 .from('metrics')
                 .select('*')
@@ -380,6 +432,12 @@ export async function POST(req: NextRequest) {
 
     const sources = {
       keywords: [...built.envelope.relevant_keywords, ...built.envelope.dependency_keywords],
+      business_objects: built.businessObjects.map((object) => ({
+        id: object.id,
+        type: object.object_type,
+        name: object.display_name,
+        fact_count: object.facts.length,
+      })),
       documents: built.chunks.map((c) => ({
         chunk_id: c.id,
         asset_id: c.asset_id,
@@ -449,6 +507,7 @@ export async function POST(req: NextRequest) {
         sources,
         calculations: toolResults,
         missing_data: built.envelope.missing_data,
+        context_quality: built.contextQuality,
       },
       error: null,
     });

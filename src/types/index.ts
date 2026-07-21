@@ -49,6 +49,68 @@ export interface OrganizationInvite {
   created_at: string;
 }
 
+// =====================================================
+// Grounded business object layer
+// =====================================================
+
+export type TruthStatus = 'verified' | 'approved' | 'derived' | 'asserted' | 'disputed';
+export type BusinessFactDataType =
+  | 'text' | 'number' | 'date' | 'datetime' | 'boolean' | 'currency' | 'percentage' | 'json';
+export type BusinessFactSourceType =
+  | 'manual' | 'dataset' | 'document' | 'metric' | 'integration' | 'ai_extraction' | 'calculation';
+
+export interface BusinessObject {
+  id: string;
+  organization_id: string;
+  object_type: string;
+  external_key: string | null;
+  display_name: string;
+  description: string | null;
+  status: string;
+  canonical_keyword_id: string | null;
+  attributes: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  facts?: BusinessFact[];
+}
+
+export interface BusinessFact {
+  id: string;
+  organization_id: string;
+  object_id: string;
+  fact_key: string;
+  value: unknown;
+  data_type: BusinessFactDataType;
+  unit: string | null;
+  valid_from: string;
+  valid_to: string | null;
+  recorded_at: string;
+  truth_status: TruthStatus;
+  confidence: number | null;
+  source_type: BusinessFactSourceType;
+  source_asset_id: string | null;
+  source_table_id: string | null;
+  source_row_id: string | null;
+  source_metric_id: string | null;
+  derivation: string | null;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface BusinessEvent {
+  id: string;
+  organization_id: string;
+  object_id: string | null;
+  event_type: string;
+  occurred_at: string;
+  payload: Record<string, unknown>;
+  truth_status: TruthStatus;
+  source_type: string;
+  created_at: string;
+}
+
 export interface AuditLogEntry {
   id: string;
   organization_id: string;

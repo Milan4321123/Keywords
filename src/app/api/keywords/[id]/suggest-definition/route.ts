@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireOrgContext, audit } from '@/lib/auth';
 import { apiError } from '@/lib/api';
-import { chatCompletion } from '@/lib/openai';
+import { getProvider } from '@/lib/ai/provider';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -79,12 +79,12 @@ export async function POST(req: NextRequest, { params }: RouteParams) {
         : null,
     ].filter(Boolean);
 
-    const response = await chatCompletion(
+    const response = await getProvider().chat(
       [
         { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: contextLines.join('\n') },
       ],
-      { temperature: 0.4, max_tokens: 700 }
+      { tier: 'strong', json: true, temperature: 0.4, maxTokens: 700 }
     );
 
     let parsed: { definition?: string; explanation?: string; examples?: string[] };

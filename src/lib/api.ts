@@ -19,22 +19,23 @@ function mapAIProviderError(error: unknown): { status: number; message: string }
         'KI-Anbieter-Kontingent aufgebraucht — OpenAI-Abrechnung prüfen · AI provider quota exhausted, check OpenAI billing',
     };
   }
-  if (status === 429 && /openai|rate limit/i.test(message)) {
+  if (status === 429 || /rate limit/i.test(message)) {
     return {
       status: 503,
       message: 'KI-Anbieter überlastet, bitte kurz warten · AI provider rate-limited, retry shortly',
     };
   }
-  if (/OPENAI_API_KEY is not configured|environment variable is missing/i.test(message)) {
+  const missingKey = message.match(/(OPENAI|GROQ|ANTHROPIC)_API_KEY is not configured/i)?.[1]?.toUpperCase();
+  if (missingKey || /environment variable is missing/i.test(message)) {
     return {
       status: 503,
-      message: 'KI nicht konfiguriert — OPENAI_API_KEY setzen · AI not configured, set OPENAI_API_KEY',
+      message: `KI nicht konfiguriert — ${missingKey ?? 'AI'}_API_KEY setzen · AI not configured, set ${missingKey ?? 'AI'}_API_KEY`,
     };
   }
-  if (/incorrect api key|invalid api key/i.test(message)) {
+  if (/incorrect api key|invalid api key|invalid_api_key/i.test(message)) {
     return {
       status: 503,
-      message: 'KI-Anbieter-Schlüssel ungültig — OPENAI_API_KEY prüfen · Invalid AI provider API key',
+      message: 'KI-Anbieter-Schlüssel ungültig · Invalid AI provider API key',
     };
   }
   return null;

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireOrgContext } from '@/lib/auth';
 import { apiError } from '@/lib/api';
+import { personalKeywordScope } from '@/lib/ontology/assignments';
 
 type RouteParams = { params: Promise<{ id: string }> };
 
@@ -23,13 +24,24 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
 
     const { data: asset, error } = await ctx.supabase
       .from('assets')
-      .select('id, file_url, meta_json')
+      .select('id, file_url, meta_json, created_by, links:keyword_assets(keyword_id)')
       .eq('id', id)
       .eq('organization_id', ctx.org.id)
       .maybeSingle();
     if (error) throw error;
     if (!asset) {
       return NextResponse.json({ data: null, error: 'Asset not found' }, { status: 404 });
+    }
+
+    // Personal scope: a restricted worker may open a file only when it is
+    // their own upload or linked to a keyword in their assigned branches.
+    const scope = await personalKeywordScope(ctx);
+    if (scope) {
+      const own = asset.created_by === ctx.user.id;
+      const linkedInScope = ((asset as any).links ?? []).some((l: any) => scope.has(l.keyword_id));
+      if (!own && !linkedInScope) {
+        return NextResponse.json({ data: null, error: 'Asset not found' }, { status: 404 });
+      }
     }
 
     const path = storagePathFromAsset(asset);

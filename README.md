@@ -62,6 +62,14 @@ The full product design (architecture, schema, AI routing, security model, miles
 - Analytics chat that calls tools and returns row-level evidence (traceable IDs)
 - UI at `/analytics`
 
+### Grounded Projects & Business Objects
+- Project cockpit at `/projects` combines delivery, cost, risks, decisions, tasks, stakeholders, and evidence
+- Stable identities for projects, customers, employees, suppliers, invoices, products, and other real business objects
+- Append-only, time-valid facts: corrections close the old fact instead of erasing history
+- Every fact carries a truth status and provenance (`manual`, dataset row, document, metric, integration, or calculation)
+- Immutable event ledger separates what happened from the object's current state
+- AI context explicitly distinguishes approved/verified facts, derived facts, asserted input, and disputed data
+
 ## Tech Stack
 
 - **Frontend**: Next.js 14, React, TypeScript, Tailwind CSS
@@ -88,7 +96,8 @@ The full product design (architecture, schema, AI routing, security model, miles
 
 2. **Set up Supabase**
    - Create a new Supabase project
-   - In the SQL Editor, run **`supabase/setup_complete.sql`** — one idempotent file containing the base schema + all migrations (0002–0006). It is safe to run on a fresh project *or* re-run on a partial/existing one, so if an earlier run failed halfway you can just paste it again.
+   - In the SQL Editor, run **`supabase/setup_complete.sql`** — the idempotent base schema and platform migrations.
+   - Then run **`supabase/migrations/0008_business_object_layer.sql`** to enable stable business identities, sourced facts, events, and the grounded AI object context.
    - Enable the `pgvector` extension (the script enables it, but confirm under Database → Extensions)
    - Create a storage bucket named `assets` (set it Private — the app serves files via signed URLs)
    - Enable email/password auth under Authentication → Providers
@@ -103,8 +112,18 @@ The full product design (architecture, schema, AI routing, security model, miles
    NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
    NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
    SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+   # Free hosted open-weight models for table/metric design and AI reasoning
+   AI_PROVIDER=groq
+   GROQ_API_KEY=gsk_your-groq-key
+
+   # Still optional for embeddings, image OCR, and OpenAI-only legacy routes
    OPENAI_API_KEY=sk-your-openai-key
    ```
+
+   The default Groq models are `openai/gpt-oss-120b` for strong reasoning and
+   `openai/gpt-oss-20b` for fast routing. Override them with `GROQ_MODEL` and
+   `GROQ_FAST_MODEL`. Groq is OpenAI-compatible, but its chat provider is kept
+   separate here so changing it cannot accidentally redirect embedding calls.
 
 4. **Run development server**
    ```bash
@@ -125,6 +144,23 @@ npm run seed:demo -- --reset             # wipe + recreate the demo orgs
 ```
 
 This creates **Demo Bau GmbH** (`demo-bau`) and **Ristorante Bella Vista** (`demo-restaurant`). Log in and switch organizations to explore them, or use them as templates for your own business.
+
+Add a realistic employee-level work-time schedule with editable date, time,
+number, and EUR fields plus six computable metrics. This seed is additive and
+does not replace manually edited rows:
+
+```bash
+npm run seed:operations
+npm run seed:operations -- --org demo-restaurant
+```
+
+Seed a connected project-management scenario (project plan, risks, decisions,
+stakeholders, evidence, dependent tasks, exact metrics, and—when migration 0008
+is installed—a linked Project Atlas business object with current facts):
+
+```bash
+npm run seed:project -- --org milan
+```
 
 ## LLM Vault Connector (Obsidian-style)
 

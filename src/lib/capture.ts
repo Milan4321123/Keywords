@@ -120,6 +120,73 @@ export interface CoercionResult {
 }
 
 /**
+ * Parse business numbers entered with either German or English separators.
+ * Currency symbols/codes and accounting negatives are accepted, while stray
+ * text is rejected instead of being partially parsed.
+ */
+export function parseLocaleNumber(raw: unknown): number | null {
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null;
+
+  let value = String(raw ?? '')
+    .trim()
+    .replace(/[\u00a0\u202f\s]/g, '')
+    .replace(/[−–—]/g, '-');
+  if (!value) return null;
+
+  let accountingNegative = false;
+  if (/^\(.*\)$/.test(value)) {
+    accountingNegative = true;
+    value = value.slice(1, -1);
+  }
+
+  // Common currency symbols plus a three-letter ISO code at either edge.
+  value = value
+    .replace(/^[A-Za-z]{3}/, '')
+    .replace(/[A-Za-z]{3}$/, '')
+    .replace(/[€$£¥₹₽₩₪₫₴₦₱฿₺₡₲₵₸₼₾₿]/g, '')
+    .replace(/[’']/g, '');
+  if (!/^[+-]?[0-9.,]+$/.test(value)) return null;
+
+  const sign = value.startsWith('-') ? -1 : 1;
+  value = value.replace(/^[+-]/, '');
+  if (!value || !/\d/.test(value)) return null;
+
+  const comma = value.lastIndexOf(',');
+  const dot = value.lastIndexOf('.');
+  let normalized: string;
+
+  if (comma >= 0 && dot >= 0) {
+    // Whichever separator appears last is the decimal mark; the other groups thousands.
+    const decimalMark = comma > dot ? ',' : '.';
+    const groupingMark = decimalMark === ',' ? '.' : ',';
+    normalized = value.split(groupingMark).join('');
+    const decimalIndex = normalized.lastIndexOf(decimalMark);
+    normalized =
+      normalized.slice(0, decimalIndex).split(decimalMark).join('') +
+      '.' +
+      normalized.slice(decimalIndex + 1);
+  } else if (comma >= 0 || dot >= 0) {
+    const separator = comma >= 0 ? ',' : '.';
+    const parts = value.split(separator);
+    if (parts.some((part) => part === '')) return null;
+    const looksGrouped =
+      parts.length > 2
+        ? parts.slice(1).every((part) => part.length === 3)
+        : parts.length === 2 && parts[0] !== '0' && parts[1].length === 3;
+    if (parts.length > 2 && !looksGrouped) return null;
+    normalized = looksGrouped
+      ? parts.join('')
+      : `${parts.slice(0, -1).join('')}.${parts.at(-1)}`;
+  } else {
+    normalized = value;
+  }
+
+  if (!/^\d+(?:\.\d+)?$/.test(normalized)) return null;
+  const parsed = Number(normalized) * sign * (accountingNegative ? -1 : 1);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
  * Validate a submission against the column definitions and coerce values to
  * the column types. Server-side autos (user, weekday, evidence) are applied
  * here so clients cannot spoof them.
@@ -160,11 +227,8 @@ export function validateAndCoerce(
 
     switch (field.data_type) {
       case 'number': {
-        const num =
-          typeof raw === 'number'
-            ? raw
-            : Number(String(raw).trim().replace(/\s/g, '').replace(',', '.'));
-        if (!Number.isFinite(num)) {
+        const num = parseLocaleNumber(raw);
+        if (num == null) {
           errors.push(`"${field.label}" ist keine Zahl · not a number`);
           data[field.field] = null;
           break;

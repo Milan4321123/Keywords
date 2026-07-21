@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireOrgContext, audit } from '@/lib/auth';
 import { apiError } from '@/lib/api';
 import { enforceRateLimit } from '@/lib/rate-limit';
-import { createEmbedding, chatCompletion, rerankChunks } from '@/lib/openai';
+import { createEmbedding, rerankChunks } from '@/lib/openai';
+import { getProvider } from '@/lib/ai/provider';
 import { buildAIContext, getSystemPrompt, extractPotentialKeywords, rankChunks } from '@/lib/ai-context';
 import { getDependencyContext, edgesToRelations } from '@/lib/ontology/graph';
 import { readCachedWorldModel, readGuidance } from '@/lib/ai/skills';
@@ -255,9 +256,10 @@ export async function POST(req: NextRequest) {
       { role: 'user' as const, content: question },
     ];
 
-    const answer = await chatCompletion(messages, {
+    const answer = await getProvider().chat(messages, {
+      tier: 'strong',
       temperature: 0.7,
-      max_tokens: 1500,
+      maxTokens: 1500,
     });
 
     // 9. Compile sources
