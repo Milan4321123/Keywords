@@ -70,6 +70,15 @@ function validateSpec(
     const rules: Record<string, unknown> = {};
     if (typeof col?.validation_rules?.min === 'number') rules.min = col.validation_rules.min;
     if (typeof col?.validation_rules?.max === 'number') rules.max = col.validation_rules.max;
+    // Curated dropdown options + multi-select flag
+    if (Array.isArray(col?.validation_rules?.options)) {
+      const options = col.validation_rules.options
+        .map((o: unknown) => String(o ?? '').trim().slice(0, 80))
+        .filter(Boolean)
+        .slice(0, 30);
+      if (options.length > 0) rules.options = options;
+    }
+    if (col?.validation_rules?.multiple === true && dataType === 'text') rules.multiple = true;
 
     columns.push({
       name,
@@ -107,6 +116,8 @@ Rules:
 - ALWAYS include a business_date or event_timestamp column so records can be analyzed per day/month.
 - Include an employee_id column and an evidence_reference column when workers will capture the data.
 - Mark truly essential columns is_required=true. Add validation_rules {min,max} for numbers where obvious (e.g. amounts ≥ 0).
+- Categorical text columns (task type, subtask, area, reason, shift …) get a curated dropdown: validation_rules {"options":["…","…"]} with sensible starter values in the user's language — users can extend the list later.
+- When SEVERAL values can apply to one record (e.g. multiple subtasks done in one entry), add validation_rules {"options":[…],"multiple":true} on that text column.
 - If one of the provided keywords clearly matches the topic, set keyword_id to its id; else null.
 - Maximum 15 columns; fewer is better.
 Return ONLY JSON:

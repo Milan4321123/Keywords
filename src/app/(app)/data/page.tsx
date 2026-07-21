@@ -10,14 +10,16 @@ import {
   Loader2,
   FolderTree,
   ChevronDown,
+  Users as UsersIcon,
 } from 'lucide-react';
 import { Dataset, DatasetRow, DatasetTable, AnalyticsAskResponse, AnalyticsRecommendationResponse, Keyword } from '@/types';
 import DatasetQualityPanel from '@/components/DatasetQualityPanel';
 import AiTableDesigner from '@/components/AiTableDesigner';
 import KeywordDataWorkspace from '@/components/KeywordDataWorkspace';
 import DataGrid from '@/components/DataGrid';
+import SkillMatrix from '@/components/SkillMatrix';
 
-type HubTab = 'data' | 'quality' | 'ai';
+type HubTab = 'data' | 'team' | 'quality' | 'ai';
 
 type TableOption = { dataset: Dataset; table: DatasetTable };
 
@@ -306,6 +308,7 @@ export default function AnalyticsPage() {
 
   const tabs: Array<{ id: HubTab; label: string; icon: React.ComponentType<{ className?: string }> }> = [
     { id: 'data', label: 'Daten · Data', icon: Table2 },
+    { id: 'team', label: 'Team · Skills', icon: UsersIcon },
     { id: 'quality', label: 'Qualität · Quality', icon: ShieldCheck },
     { id: 'ai', label: 'KI-Analyse · AI', icon: Sparkles },
   ];
@@ -489,6 +492,10 @@ export default function AnalyticsPage() {
                 ))}
 
               {/* Tab: Qualität */}
+              {tab === 'team' && (
+                <SkillMatrix tableId={selected.table.id} columns={(selected.table.columns ?? []) as any} />
+              )}
+
               {tab === 'quality' && <DatasetQualityPanel tableId={selected.table.id} />}
 
               {/* Tab: KI-Analyse */}

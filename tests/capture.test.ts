@@ -49,3 +49,47 @@ test('coercion applies numeric bounds after locale parsing', () => {
   assert.equal(tooHigh.ok, false);
   assert.match(tooHigh.errors[0], /≤ 2000/);
 });
+
+// ---- multi-select (curated dropdowns, several subtasks per record) ----
+
+const multiField: CaptureField = {
+  field: 'subtasks',
+  label: 'Teilaufgaben',
+  data_type: 'text',
+  semantic: null,
+  required: true,
+  description: null,
+  options: ['Fliesen', 'Putz', 'Elektrik'],
+  curated: true,
+  multiple: true,
+  min: null,
+  max: null,
+  auto: null,
+};
+
+test('multi-select arrays are joined with " | "', () => {
+  const result = validateAndCoerce([multiField], { subtasks: ['Fliesen', ' Putz ', ''] }, {
+    userEmail: 'worker@example.com',
+    evidenceReference: null,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.data.subtasks, 'Fliesen | Putz');
+});
+
+test('already-joined multi strings pass through unchanged', () => {
+  const result = validateAndCoerce([multiField], { subtasks: 'Fliesen | Elektrik' }, {
+    userEmail: 'worker@example.com',
+    evidenceReference: null,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.data.subtasks, 'Fliesen | Elektrik');
+});
+
+test('empty multi-select on a required field is rejected', () => {
+  const result = validateAndCoerce([multiField], { subtasks: [] }, {
+    userEmail: 'worker@example.com',
+    evidenceReference: null,
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.errors[0], /Teilaufgaben/);
+});

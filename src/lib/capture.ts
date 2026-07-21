@@ -24,6 +24,7 @@ function autoFor(semantic: string | null, dataType: string): CaptureFieldAuto {
 }
 
 interface ColumnRow {
+  id: string;
   name: string;
   normalized_name: string;
   data_type: 'text' | 'number' | 'date' | 'boolean' | 'json';
@@ -31,6 +32,17 @@ interface ColumnRow {
   description: string | null;
   is_required: boolean;
   validation_rules: Record<string, any> | null;
+}
+
+/** Curated dropdown options stored on the column (validation_rules.options). */
+export function curatedOptions(rules: Record<string, any> | null): string[] | null {
+  const options = rules?.options;
+  if (!Array.isArray(options)) return null;
+  const cleaned = options
+    .map((o) => String(o ?? '').trim())
+    .filter(Boolean)
+    .slice(0, 50);
+  return cleaned.length > 0 ? cleaned : null;
 }
 
 /**
@@ -80,19 +92,23 @@ export async function getCaptureFormsForKeyword(
 
       const fields: CaptureField[] = columns.map((col) => {
         const rules = col.validation_rules ?? {};
+        const curated = curatedOptions(rules);
         const values = distinct.get(col.normalized_name);
-        const options =
+        const harvested =
           col.data_type === 'text' && values && values.size >= OPTION_MIN && values.size <= OPTION_MAX
             ? Array.from(values).sort()
             : null;
         return {
           field: col.normalized_name,
+          column_id: col.id,
           label: col.name,
           data_type: col.data_type,
           semantic: col.semantic_name ?? null,
           required: Boolean(col.is_required),
           description: col.description ?? null,
-          options,
+          options: curated ?? harvested,
+          curated: Boolean(curated),
+          multiple: Boolean(rules.multiple),
           min: typeof rules.min === 'number' ? rules.min : null,
           max: typeof rules.max === 'number' ? rules.max : null,
           auto: autoFor(col.semantic_name ?? null, col.data_type),
@@ -214,7 +230,16 @@ export function validateAndCoerce(
       continue;
     }
 
-    const raw = values[field.field];
+    let raw = values[field.field];
+
+    // Multi-select fields arrive as arrays; store them joined with " | "
+    if (field.multiple && Array.isArray(raw)) {
+      raw = raw
+        .map((v) => String(v ?? '').trim())
+        .filter(Boolean)
+        .join(' | ');
+    }
+
     const empty = raw == null || String(raw).trim() === '';
 
     if (empty) {

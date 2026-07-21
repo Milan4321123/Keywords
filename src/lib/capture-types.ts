@@ -6,14 +6,23 @@ export type CaptureFieldAuto = 'today' | 'now' | 'user' | 'weekday' | 'evidence'
 export interface CaptureField {
   /** normalized column name — key in the submitted values object */
   field: string;
+  /** dataset_columns.id — needed to extend the curated option list */
+  column_id?: string | null;
   /** display label (original column name) */
   label: string;
   data_type: 'text' | 'number' | 'date' | 'boolean' | 'json';
   semantic: string | null;
   required: boolean;
   description: string | null;
-  /** dropdown choices harvested from existing rows (2–12 distinct values) */
+  /**
+   * Dropdown choices. Curated options from validation_rules.options win;
+   * otherwise harvested from existing rows (2–12 distinct values).
+   */
   options: string[] | null;
+  /** true when curated options exist → the list is editable ("+ Neu") */
+  curated?: boolean;
+  /** multi-select: several values per record, stored joined with " | " */
+  multiple?: boolean;
   min: number | null;
   max: number | null;
   /**
