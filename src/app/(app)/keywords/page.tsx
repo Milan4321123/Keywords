@@ -15,9 +15,11 @@ import {
 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { Keyword } from '@/types';
+import { CaptureFormDef } from '@/lib/capture-types';
 import KeywordDetail from '@/components/KeywordDetail';
 import AIAssistant from '@/components/AIAssistant';
 import ImportExportMenu from '@/components/ImportExportMenu';
+import CaptureForm from '@/components/CaptureForm';
 
 function completenessDot(score: number | undefined): string {
   const s = score ?? 0;
@@ -53,6 +55,35 @@ export default function KeywordsPage() {
   const [aiOpen, setAiOpen] = useState(false);
   // Chat scoping: which keywords the AI should focus on (follows navigation).
   const [chatScopeIds, setChatScopeIds] = useState<string[]>([]);
+
+  // Structured entry forms for the keyword we are inside (Eingabe im Drill-down)
+  const [captureForms, setCaptureForms] = useState<CaptureFormDef[]>([]);
+  useEffect(() => {
+    if (!currentId) {
+      setCaptureForms([]);
+      return;
+    }
+    let cancelled = false;
+    fetch(`/api/capture?keyword_id=${currentId}`)
+      .then((r) => r.json())
+      .then(({ data }) => {
+        if (!cancelled) setCaptureForms(data?.forms ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setCaptureForms([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentId]);
+
+  const refreshCaptureForms = useCallback(() => {
+    if (!currentId) return;
+    fetch(`/api/capture?keyword_id=${currentId}`)
+      .then((r) => r.json())
+      .then(({ data }) => setCaptureForms(data?.forms ?? []))
+      .catch(() => {});
+  }, [currentId]);
 
   const showToast = useCallback((message: string) => {
     setToast(message);
@@ -367,6 +398,17 @@ export default function KeywordsPage() {
                 </button>
               </div>
             )}
+
+            {/* Eingabe: structured entry directly at this branch */}
+            {current &&
+              captureForms.map((form) => (
+                <CaptureForm
+                  key={form.dataset_table_id}
+                  form={form}
+                  keywordId={current.id}
+                  onSaved={refreshCaptureForms}
+                />
+              ))}
 
             {/* Section label */}
             <p className="px-4 mb-2 text-[12px] font-semibold text-slate-400 uppercase tracking-wide">

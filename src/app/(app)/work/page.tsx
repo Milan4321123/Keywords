@@ -213,6 +213,11 @@ export default function WorkPage() {
             onSaved={() => {
               setSavedFlash(true);
               setTimeout(() => setSavedFlash(false), 1800);
+              // refresh "Meine Einträge"
+              fetch(`/api/capture?keyword_id=${selected.id}`)
+                .then((r) => r.json())
+                .then(({ data }) => setCaptureForms(data?.forms ?? []))
+                .catch(() => {});
             }}
           />
         ))}

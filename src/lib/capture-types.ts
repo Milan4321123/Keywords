@@ -27,6 +27,13 @@ export interface CaptureField {
   auto: CaptureFieldAuto;
 }
 
+export interface OwnRecord {
+  id: string;
+  row_index: number;
+  data: Record<string, unknown>;
+  created_at: string;
+}
+
 export interface CaptureFormDef {
   dataset_table_id: string;
   table_name: string;
@@ -34,6 +41,8 @@ export interface CaptureFormDef {
   keyword_id: string;
   row_count: number;
   fields: CaptureField[];
+  /** The current member's latest records in this table ("Meine Einträge"). */
+  recent_own?: OwnRecord[];
 }
 
 export interface CaptureSubmission {

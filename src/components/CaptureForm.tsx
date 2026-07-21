@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useMemo, useRef, useState } from 'react';
-import { ClipboardList, Camera, Check, Loader2, X } from 'lucide-react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { ClipboardList, Camera, Check, Loader2, X, History } from 'lucide-react';
 import { CaptureField, CaptureFormDef } from '@/lib/capture-types';
 
 interface CaptureFormProps {
@@ -11,7 +11,9 @@ interface CaptureFormProps {
 }
 
 function todayISO(): string {
-  return new Date().toISOString().slice(0, 10);
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  return now.toISOString().slice(0, 10);
 }
 
 function nowLocalISO(): string {
@@ -42,7 +44,26 @@ export default function CaptureForm({ form, keywordId, onSaved }: CaptureFormPro
   const [busy, setBusy] = useState<'photo' | 'save' | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [memberNames, setMemberNames] = useState<string[]>([]);
   const photoRef = useRef<HTMLInputElement>(null);
+
+  // "person" columns pick WHICH employee the record is about
+  const hasPersonField = useMemo(
+    () => form.fields.some((f) => f.semantic === 'person'),
+    [form.fields]
+  );
+  useEffect(() => {
+    if (!hasPersonField) return;
+    fetch('/api/orgs/members')
+      .then((r) => r.json())
+      .then(({ data }) => {
+        const names = (data?.members ?? [])
+          .map((m: any) => m.profiles?.full_name || m.profiles?.email)
+          .filter(Boolean);
+        setMemberNames(Array.from(new Set(names)));
+      })
+      .catch(() => setMemberNames([]));
+  }, [hasPersonField]);
 
   const setValue = (field: string, value: string) =>
     setValues((prev) => ({ ...prev, [field]: value }));
@@ -141,6 +162,18 @@ export default function CaptureForm({ form, keywordId, onSaved }: CaptureFormPro
         />
       );
     }
+    if (field.semantic === 'person') {
+      // Combine team members with any values already in the data
+      const choices = Array.from(new Set([...memberNames, ...(field.options ?? [])])).sort();
+      return (
+        <select value={value} onChange={(e) => setValue(field.field, e.target.value)} className={base}>
+          <option value="">Mitarbeiter wählen · Choose worker…</option>
+          {choices.map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
+      );
+    }
     if (field.options && field.options.length > 0) {
       return (
         <select value={value} onChange={(e) => setValue(field.field, e.target.value)} className={base}>
@@ -237,6 +270,43 @@ export default function CaptureForm({ form, keywordId, onSaved }: CaptureFormPro
       <p className="mt-1.5 text-[10px] text-slate-400 text-center">
         Datum, Uhrzeit & Nutzer werden automatisch ergänzt · Date, time & user are added automatically
       </p>
+
+      {/* Personal history: only this member's records */}
+      {(form.recent_own?.length ?? 0) > 0 && (
+        <div className="mt-4 pt-3 border-t border-slate-100">
+          <div className="flex items-center gap-1.5 text-xs font-bold text-slate-500 mb-2">
+            <History className="w-3.5 h-3.5 text-slate-400" />
+            Meine letzten Einträge · My recent records
+          </div>
+          <div className="space-y-1">
+            {form.recent_own!.map((record) => {
+              const parts = fields
+                .map((f) => {
+                  const value = record.data[f.field];
+                  if (value == null || value === '') return null;
+                  const text =
+                    f.data_type === 'number' && typeof value === 'number'
+                      ? value.toLocaleString(undefined, { maximumFractionDigits: 2 })
+                      : String(value).length > 22
+                        ? `${String(value).slice(0, 21)}…`
+                        : String(value);
+                  return text;
+                })
+                .filter(Boolean)
+                .slice(0, 4);
+              return (
+                <div
+                  key={record.id}
+                  className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-50 text-xs text-slate-600"
+                >
+                  <span className="text-slate-400 tabular-nums shrink-0">#{record.row_index}</span>
+                  <span className="truncate">{parts.join(' · ')}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

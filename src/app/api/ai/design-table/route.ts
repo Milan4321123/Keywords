@@ -10,7 +10,7 @@ const COLUMN_TYPES = ['text', 'number', 'date', 'boolean'];
 const KNOWN_SEMANTICS = [
   'business_date', 'event_timestamp', 'measurement_timestamp', 'weekday',
   'amount', 'quantity', 'unit', 'currency', 'status', 'identifier',
-  'entity', 'dimension', 'period', 'employee_id', 'evidence_reference',
+  'entity', 'dimension', 'period', 'employee_id', 'evidence_reference', 'person',
 ];
 
 interface ColumnSpec {
@@ -102,7 +102,8 @@ const SYSTEM_PROMPT = `You design a structured data table ("placeholder") a busi
 Rules:
 - Columns get German-friendly display names in the user's language; normalized_name is snake_case ASCII.
 - data_type: text | number | date | boolean. Currency and money are ALWAYS number (the currency itself is a separate text column only if multiple currencies are plausible).
-- semantic_name gives each column stable business meaning. Use these when they fit: ${KNOWN_SEMANTICS.join(', ')}. Amounts of money → "amount". The record's main date → "business_date" (enables daily tracking, auto-filled with today). Exact times → "event_timestamp". Who recorded it → "employee_id" (auto-filled). Photo/receipt reference → "evidence_reference" (auto-filled).
+- semantic_name gives each column stable business meaning. Use these when they fit: ${KNOWN_SEMANTICS.join(', ')}. Amounts of money → "amount". The record's main date → "business_date" (enables daily tracking, auto-filled with today). Exact times → "event_timestamp". Who recorded it → "employee_id" (auto-filled). WHICH employee the record is ABOUT (whose shift, whose hours, whose tip) → "person" (rendered as a worker dropdown). Photo/receipt reference → "evidence_reference" (auto-filled).
+- Time tracking / Zeiterfassung, tips per waiter, per-employee records → ALWAYS include a "person" column.
 - ALWAYS include a business_date or event_timestamp column so records can be analyzed per day/month.
 - Include an employee_id column and an evidence_reference column when workers will capture the data.
 - Mark truly essential columns is_required=true. Add validation_rules {min,max} for numbers where obvious (e.g. amounts ≥ 0).
