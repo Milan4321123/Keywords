@@ -4,7 +4,7 @@ import { apiError } from '@/lib/api';
 import { getProvider, getToolRuntime } from '@/lib/ai/provider';
 import { detectIntent, needsStructuredData, Intent } from '@/lib/ai/router';
 import { buildContext, SYSTEM_INSTRUCTIONS } from '@/lib/ai/context-builder';
-import { runTableQuery, comparePeriods, DatasetRow } from '@/lib/analytics';
+import { runTableQuery, comparePeriods, joinTables, DatasetRow } from '@/lib/analytics';
 import { computeMetric, MetricDefinition } from '@/lib/metrics/compute';
 import { compareMetricValues, MetricComparisonOperation } from '@/lib/metrics/compare';
 import { forecastSeries } from '@/lib/forecasting/forecast';
@@ -245,6 +245,27 @@ export async function POST(req: NextRequest) {
         {
           type: 'function' as const,
           function: {
+            name: 'join_query',
+            description:
+              'Cross-table analysis: join TWO tables on a key, then filter/group/aggregate the joined rows. Right-table columns are referenced with the prefix "r_". Use for math spanning tables (sold margin = item_sales ⋈ menu_economics on item_code) and for per-person experience/skill matrices (task log grouped by person × subtask) e.g. as ground truth for shift planning. Never estimate — compute.',
+            parameters: {
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                left_table_id: { type: 'string' },
+                right_table_id: { type: 'string' },
+                left_key: { type: 'string', description: 'join field in the left table' },
+                right_key: { type: 'string', description: 'join field in the right table' },
+                join_type: { type: 'string', enum: ['inner', 'left'] },
+                ...QUERY_SPEC_PROPS,
+              },
+              required: ['left_table_id', 'right_table_id', 'left_key', 'right_key', 'metrics'],
+            },
+          },
+        },
+        {
+          type: 'function' as const,
+          function: {
             name: 'compute_metric',
             description:
               'Compute a metric from the metric catalog by its id. The catalog definition decides table, column, filters, and aggregation — prefer this over query_table when a catalog metric matches the question. mode "series" returns a time series with anomaly flags.',
@@ -369,6 +390,25 @@ export async function POST(req: NextRequest) {
                   metric: metricRow.name,
                   ...forecastSeries(history, Math.max(1, Math.min(args.horizon ?? 3, 12))),
                   history_used: history,
+                };
+              }
+            } else if (call.function.name === 'join_query') {
+              if (!validTableIds.has(args.left_table_id) || !validTableIds.has(args.right_table_id)) {
+                output = { error: `Unknown table id. Use ids from: ${Array.from(validTableIds).join(', ')}` };
+              } else {
+                const [leftRows, rightRows] = await Promise.all([
+                  loadRows(args.left_table_id),
+                  loadRows(args.right_table_id),
+                ]);
+                const joined = joinTables(leftRows, rightRows, {
+                  left_key: args.left_key,
+                  right_key: args.right_key,
+                  join_type: args.join_type === 'left' ? 'left' : 'inner',
+                });
+                output = {
+                  join_stats: joined.stats,
+                  result: runTableQuery(joined.rows, args),
+                  note: 'right-table columns are prefixed with r_',
                 };
               }
             } else if (!validTableIds.has(args.table_id)) {

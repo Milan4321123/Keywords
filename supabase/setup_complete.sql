@@ -1315,3 +1315,14 @@ create policy keyword_assignments_member_select on keyword_assignments for selec
 drop policy if exists keyword_assignments_admin_write on keyword_assignments;
 create policy keyword_assignments_admin_write on keyword_assignments for all
   using (public.current_member_role(organization_id) in ('owner','admin'));
+
+-- ============ MIGRATION 0008 ============
+-- =====================================================
+-- Migration 0008: Cross-table (join) metrics
+-- A metric may join a second table before aggregating:
+-- join_spec = { "right_table_id": uuid, "left_key": text,
+--               "right_key": text, "join_type": "inner"|"left",
+--               "prefix": text }
+-- =====================================================
+
+alter table metrics add column if not exists join_spec jsonb;

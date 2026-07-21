@@ -14,6 +14,12 @@ interface MetricSpec {
   filters: Array<Record<string, unknown>>;
   time_grain: string;
   caveats: string | null;
+  join?: {
+    right_table_id: string;
+    left_key: string;
+    right_key: string;
+    join_type: string;
+  } | null;
 }
 
 interface Proposal {
@@ -151,7 +157,7 @@ export default function AiMetricDesigner({ onCreated }: { onCreated: () => void 
                       <div className="min-w-0">
                         <div className="font-bold text-slate-900 text-sm">{proposal.spec.name}</div>
                         <div className="text-xs text-slate-500 mt-0.5">{proposal.spec.formula}</div>
-                        <div className="flex items-center gap-1.5 mt-1.5 text-[11px] text-slate-400">
+                        <div className="flex items-center gap-1.5 mt-1.5 text-[11px] text-slate-400 flex-wrap">
                           <Table2 className="w-3 h-3" />
                           {tableLabel(proposal.spec.source_table_id)}
                           <span className="font-mono">
@@ -159,6 +165,14 @@ export default function AiMetricDesigner({ onCreated }: { onCreated: () => void 
                             {proposal.spec.date_column ? ` / ${proposal.spec.time_grain}` : ''}
                           </span>
                         </div>
+                        {proposal.spec.join && (
+                          <div className="mt-1 text-[11px] text-violet-600 font-medium">
+                            ⋈ verknüpft mit · joined with {tableLabel(proposal.spec.join.right_table_id)}{' '}
+                            <span className="font-mono text-violet-400">
+                              ({proposal.spec.join.left_key} = {proposal.spec.join.right_key})
+                            </span>
+                          </div>
+                        )}
                       </div>
                       <div className="text-right shrink-0">
                         <div className="text-[10px] font-bold text-emerald-600 uppercase">Probe-Rechnung</div>

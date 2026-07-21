@@ -398,3 +398,80 @@ export function comparePeriods(rows: DatasetRow[], spec: ComparePeriodsSpec): Co
     },
   };
 }
+
+// =====================================================
+// Cross-table joins (join_query tool / join metrics)
+// =====================================================
+
+export interface JoinSpec {
+  /** key field in the left table's rows */
+  left_key: string;
+  /** key field in the right table's rows */
+  right_key: string;
+  /** prefix for right-side fields in the joined row (default "r_") */
+  prefix?: string;
+  /** "left" keeps unmatched left rows with null right fields (default "inner") */
+  join_type?: 'inner' | 'left';
+}
+
+function joinKey(value: unknown): string | null {
+  if (value == null) return null;
+  const key = String(value).trim().toLowerCase();
+  return key === '' ? null : key;
+}
+
+/**
+ * Deterministic two-table join: for every left row, attach the first matching
+ * right row's fields under a prefix. Evidence (row ids) stays with the LEFT
+ * rows so aggregations remain traceable to source records.
+ *
+ * This is what makes cross-table math possible — e.g. item_sales joined to
+ * menu_economics on item_code to compute sold margin, or a task log joined
+ * to a worker table to build per-person skill matrices.
+ */
+export function joinTables(
+  left: DatasetRow[],
+  right: DatasetRow[],
+  spec: JoinSpec
+): { rows: DatasetRow[]; stats: { left_rows: number; matched: number; unmatched: number } } {
+  const prefix = spec.prefix ?? 'r_';
+  const joinType = spec.join_type ?? 'inner';
+
+  // First right row per key wins (deterministic by row_index order)
+  const rightByKey = new Map<string, DatasetRow>();
+  const sortedRight = [...right].sort((a, b) => a.row_index - b.row_index);
+  for (const row of sortedRight) {
+    const key = joinKey(row.data[spec.right_key]);
+    if (key != null && !rightByKey.has(key)) rightByKey.set(key, row);
+  }
+
+  const rightFields = new Set<string>();
+  for (const row of sortedRight.slice(0, 50)) {
+    for (const field of Object.keys(row.data)) rightFields.add(field);
+  }
+
+  const rows: DatasetRow[] = [];
+  let matched = 0;
+  for (const leftRow of left) {
+    const key = joinKey(leftRow.data[spec.left_key]);
+    const rightRow = key != null ? rightByKey.get(key) : undefined;
+    if (!rightRow && joinType === 'inner') continue;
+    if (rightRow) matched++;
+
+    const data: Record<string, unknown> = { ...leftRow.data };
+    for (const field of rightFields) {
+      data[`${prefix}${field}`] = rightRow ? rightRow.data[field] ?? null : null;
+    }
+    rows.push({
+      id: leftRow.id,
+      row_index: leftRow.row_index,
+      data,
+      source_json: leftRow.source_json,
+    });
+  }
+
+  return {
+    rows,
+    stats: { left_rows: left.length, matched, unmatched: left.length - matched },
+  };
+}

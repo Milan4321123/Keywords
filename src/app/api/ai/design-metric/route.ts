@@ -19,6 +19,13 @@ interface TableSchema {
   columns: Array<{ field: string; type: string; semantic: string | null; samples: string[] }>;
 }
 
+interface MetricJoin {
+  right_table_id: string;
+  left_key: string;
+  right_key: string;
+  join_type: 'inner' | 'left';
+}
+
 interface MetricSpec {
   name: string;
   description: string | null;
@@ -30,6 +37,7 @@ interface MetricSpec {
   filters: Array<Record<string, unknown>>;
   time_grain: string;
   caveats: string | null;
+  join: MetricJoin | null;
 }
 
 async function loadSchemas(ctx: OrgContext): Promise<TableSchema[]> {
@@ -59,6 +67,31 @@ function validateSpec(spec: any, schemas: TableSchema[]): { ok: true; spec: Metr
   if (!table) return { ok: false, error: `Unknown source_table_id "${spec?.source_table_id}"` };
 
   const fields = new Set(table.columns.map((c) => c.field));
+
+  // Optional cross-table join: right table must exist, keys must exist on
+  // each side, and joined right-side fields become referenceable as r_<field>.
+  let join: MetricJoin | null = null;
+  if (spec?.join && typeof spec.join === 'object' && spec.join.right_table_id) {
+    const rightTable = schemas.find((t) => t.id === spec.join.right_table_id);
+    if (!rightTable) return { ok: false, error: `Unknown join table "${spec.join.right_table_id}"` };
+    const leftKey = String(spec.join.left_key ?? '');
+    const rightKey = String(spec.join.right_key ?? '');
+    if (!fields.has(leftKey)) {
+      return { ok: false, error: `Join left_key "${leftKey}" not found in table "${table.name}"` };
+    }
+    const rightFields = new Set(rightTable.columns.map((c) => c.field));
+    if (!rightFields.has(rightKey)) {
+      return { ok: false, error: `Join right_key "${rightKey}" not found in table "${rightTable.name}"` };
+    }
+    for (const field of rightFields) fields.add(`r_${field}`);
+    join = {
+      right_table_id: rightTable.id,
+      left_key: leftKey,
+      right_key: rightKey,
+      join_type: spec.join.join_type === 'left' ? 'left' : 'inner',
+    };
+  }
+
   const name = typeof spec.name === 'string' ? spec.name.trim().slice(0, 120) : '';
   if (!name) return { ok: false, error: 'Metric name missing' };
 
@@ -103,6 +136,7 @@ function validateSpec(spec: any, schemas: TableSchema[]): { ok: true; spec: Metr
       filters,
       time_grain: GRAINS.includes(spec.time_grain) ? spec.time_grain : 'day',
       caveats: typeof spec.caveats === 'string' ? spec.caveats.slice(0, 400) : null,
+      join,
     },
   };
 }
@@ -122,6 +156,14 @@ async function testCompute(ctx: OrgContext, spec: MetricSpec) {
     filters: spec.filters as any,
     time_grain: spec.time_grain,
     caveats: spec.caveats,
+    join_spec: spec.join
+      ? {
+          right_table_id: spec.join.right_table_id,
+          left_key: spec.join.left_key,
+          right_key: spec.join.right_key,
+          join_type: spec.join.join_type,
+        }
+      : null,
   };
   const value = await computeMetric(ctx.supabase, ctx.org.id, fake, { mode: 'value' });
   return { value: value.value, matched_rows: value.matched_rows, missing: value.missing };
@@ -129,16 +171,19 @@ async function testCompute(ctx: OrgContext, spec: MetricSpec) {
 
 const SYSTEM_PROMPT = `You translate a business owner's plain-language description into metric definitions for a deterministic computation engine — like writing the Excel/SQL formula for them.
 
-The engine supports EXACTLY: one aggregation (sum|count|avg|min|max) over ONE numeric column of ONE table, with optional row filters and an optional date column for time series.
+The engine supports: one aggregation (sum|count|avg|min|max) over ONE numeric column, with optional row filters, an optional date column for time series, and OPTIONALLY a JOIN of a second table before aggregating.
+
+JOIN (cross-table metrics): add "join": {"right_table_id":"...","left_key":"<field in source table>","right_key":"<field in right table>","join_type":"inner"|"left"}.
+After the join, every column of the right table is referenceable with the prefix "r_" — in value_column, date_column, and filters. Example: source item_sales joined to menu_economics on item_code → value_column "r_contribution_margin_eur" sums the margin of each sold line. Join on identifier/entity columns that clearly hold the same values.
 
 Rules:
 - Use ONLY table ids and column field names from the provided schemas. Never invent columns.
-- If the requested math is a RATIO or combination of two aggregations (e.g. "waste as % of revenue"), decompose it into the component metrics (numerator and denominator as separate metrics) and explain the division in the caveats.
-- Prefer semantic hints (amount, business_date, status …) to choose columns.
+- If the requested math is a RATIO of two aggregations (e.g. "waste as % of revenue"), decompose it into the component metrics (numerator and denominator as separate metrics) and explain the division in the caveats. A per-row combination across tables is NOT a ratio — use a join for that.
+- Prefer semantic hints (amount, business_date, status, identifier, person …) to choose columns and join keys.
 - Filters express conditions like status = 'paid'.
 - German or English input is fine; write metric names in the language the user used.
 - Return ONLY JSON:
-{"metrics":[{"name":"...","description":"...","formula":"human-readable formula","source_table_id":"...","aggregation":"sum","value_column":"..."|null,"date_column":"..."|null,"filters":[{"field":"...","op":"eq","value":"..."}],"time_grain":"day","caveats":"..."|null}], "note":"one sentence for the user, same language as their request"}
+{"metrics":[{"name":"...","description":"...","formula":"human-readable formula","source_table_id":"...","aggregation":"sum","value_column":"..."|null,"date_column":"..."|null,"filters":[{"field":"...","op":"eq","value":"..."}],"time_grain":"day","caveats":"..."|null,"join":{...}|null}], "note":"one sentence for the user, same language as their request"}
 Maximum 4 metrics.`;
 
 // POST /api/ai/design-metric
@@ -194,6 +239,14 @@ export async function POST(req: NextRequest) {
           time_grain: validated.spec.time_grain,
           caveats: validated.spec.caveats,
           owner_member_id: ctx.memberId,
+          join_spec: validated.spec.join
+            ? {
+                right_table_id: validated.spec.join.right_table_id,
+                left_key: validated.spec.join.left_key,
+                right_key: validated.spec.join.right_key,
+                join_type: validated.spec.join.join_type,
+              }
+            : null,
         })
         .select()
         .single();

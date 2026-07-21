@@ -1,5 +1,13 @@
 import { SupabaseClient } from '@supabase/supabase-js';
-import { runTableQuery, DatasetRow, TableQueryFilter, AggregateOp } from '@/lib/analytics';
+import { runTableQuery, joinTables, DatasetRow, TableQueryFilter, AggregateOp } from '@/lib/analytics';
+
+export interface MetricJoinSpec {
+  right_table_id: string;
+  left_key: string;
+  right_key: string;
+  join_type?: 'inner' | 'left';
+  prefix?: string;
+}
 
 export interface MetricDefinition {
   id: string;
@@ -15,6 +23,8 @@ export interface MetricDefinition {
   filters: TableQueryFilter[] | Record<string, never>;
   time_grain: string;
   caveats: string | null;
+  /** Optional second table joined before aggregation (cross-table metric). */
+  join_spec?: MetricJoinSpec | null;
 }
 
 export interface MetricPoint {
@@ -134,7 +144,7 @@ export async function computeMetric(
     return empty;
   }
 
-  const rows = await loadRows(supabase, organizationId, metric.source_table_id);
+  let rows = await loadRows(supabase, organizationId, metric.source_table_id);
   if (rows === null) {
     missing.push(`Source table for metric "${metric.name}" was not found.`);
     return empty;
@@ -142,6 +152,32 @@ export async function computeMetric(
   if (rows.length === 0) {
     missing.push(`Source table for metric "${metric.name}" has no rows.`);
     return empty;
+  }
+
+  // Cross-table metric: join the right table before aggregating
+  const joinSpec = metric.join_spec ?? null;
+  if (joinSpec && joinSpec.right_table_id && joinSpec.left_key && joinSpec.right_key) {
+    const rightRows = await loadRows(supabase, organizationId, joinSpec.right_table_id);
+    if (rightRows === null) {
+      missing.push(`Join table for metric "${metric.name}" was not found.`);
+      return empty;
+    }
+    const joined = joinTables(rows, rightRows, {
+      left_key: joinSpec.left_key,
+      right_key: joinSpec.right_key,
+      join_type: joinSpec.join_type ?? 'inner',
+      prefix: joinSpec.prefix ?? 'r_',
+    });
+    if (joined.stats.unmatched > 0) {
+      missing.push(
+        `${joined.stats.unmatched} of ${joined.stats.left_rows} rows had no match on "${joinSpec.left_key}" and were ${joinSpec.join_type === 'left' ? 'kept with empty join fields' : 'excluded'}.`
+      );
+    }
+    rows = joined.rows;
+    if (rows.length === 0) {
+      missing.push(`No rows matched the join for metric "${metric.name}".`);
+      return empty;
+    }
   }
 
   const filters: TableQueryFilter[] = Array.isArray(metric.filters) ? metric.filters : [];
