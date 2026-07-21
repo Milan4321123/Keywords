@@ -11,6 +11,8 @@ import {
   FolderTree,
   ChevronDown,
   Users as UsersIcon,
+  PanelLeftClose,
+  PanelLeft,
 } from 'lucide-react';
 import { Dataset, DatasetRow, DatasetTable, AnalyticsAskResponse, AnalyticsRecommendationResponse, Keyword } from '@/types';
 import DatasetQualityPanel from '@/components/DatasetQualityPanel';
@@ -18,6 +20,7 @@ import AiTableDesigner from '@/components/AiTableDesigner';
 import KeywordDataWorkspace from '@/components/KeywordDataWorkspace';
 import DataGrid from '@/components/DataGrid';
 import SkillMatrix from '@/components/SkillMatrix';
+import { TableBuilder, ColumnManager } from '@/components/TableTools';
 
 type HubTab = 'data' | 'team' | 'quality' | 'ai';
 
@@ -58,6 +61,8 @@ export default function AnalyticsPage() {
   const [error, setError] = useState<string>('');
   const [evidenceRowsByKey, setEvidenceRowsByKey] = useState<Record<string, DatasetRow[]>>({});
   const [tab, setTab] = useState<HubTab>('data');
+  // Collapsible sidebar → tables get the full screen width
+  const [sidebarOpen, setSidebarOpen] = useState(true);
 
   const tableOptions: TableOption[] = useMemo(() => {
     const out: TableOption[] = [];
@@ -314,15 +319,25 @@ export default function AnalyticsPage() {
   ];
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
-          <Database className="w-6 h-6 text-slate-400" />
-          Data Hub
-        </h1>
-        <p className="text-sm text-slate-500 mt-1">
-          Daten ansehen, bearbeiten und berechnen · View, edit and compute your business data.
-        </p>
+    <div className={`${sidebarOpen ? 'max-w-7xl' : 'max-w-none'} mx-auto px-4 sm:px-6 lg:px-8 py-8 transition-all`}>
+      <div className="mb-6 flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
+            <Database className="w-6 h-6 text-slate-400" />
+            Data Hub
+          </h1>
+          <p className="text-sm text-slate-500 mt-1">
+            Daten ansehen, bearbeiten und berechnen · View, edit and compute your business data.
+          </p>
+        </div>
+        <button
+          onClick={() => setSidebarOpen((v) => !v)}
+          className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition-all shrink-0"
+          title={sidebarOpen ? 'Seitenleiste ausblenden → Vollbild' : 'Seitenleiste einblenden'}
+        >
+          {sidebarOpen ? <PanelLeftClose className="w-4 h-4" /> : <PanelLeft className="w-4 h-4" />}
+          <span className="hidden sm:inline">{sidebarOpen ? 'Vollbild · Fullscreen' : 'Tabellen-Liste'}</span>
+        </button>
       </div>
 
       {error && (
@@ -337,9 +352,13 @@ export default function AnalyticsPage() {
         </div>
       )}
 
-      <main className="grid grid-cols-1 lg:grid-cols-[300px,1fr] gap-6 items-start">
-        {/* ——— Sidebar: tables, upload, AI designer ——— */}
-        <section className="space-y-4">
+      <main
+        className={`grid grid-cols-1 gap-6 items-start ${
+          sidebarOpen ? 'lg:grid-cols-[300px,1fr]' : ''
+        }`}
+      >
+        {/* ——— Sidebar: tables, upload, builders ——— */}
+        <section className={`space-y-4 ${sidebarOpen ? '' : 'hidden'}`}>
           <div className="bg-white rounded-2xl border border-slate-200 p-3">
             <h2 className="px-2 py-1.5 text-xs font-bold text-slate-400 uppercase tracking-wider">
               Tabellen · Tables
@@ -417,6 +436,11 @@ export default function AnalyticsPage() {
           </div>
 
           <AiTableDesigner onCreated={(created) => loadDatasets(created?.table_id)} />
+
+          <TableBuilder
+            keywords={keywords}
+            onCreated={(created) => loadDatasets(created?.table_id)}
+          />
         </section>
 
         {/* ——— Main: selected table with tabs ——— */}
@@ -456,6 +480,12 @@ export default function AnalyticsPage() {
                     </span>
                   ))}
                 </div>
+
+                <ColumnManager
+                  tableId={selected.table.id}
+                  columns={(selected.table.columns ?? []) as any}
+                  onChanged={() => loadDatasets(selected.table.id)}
+                />
               </div>
 
               {/* Tabs */}
